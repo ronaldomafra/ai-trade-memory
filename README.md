@@ -87,7 +87,7 @@ Para evitar conclusões artificiais, somente informações efetivamente disponí
 | Memória | Janela móvel de 60 dias; padrões com amostragem mínima |
 | Persistência | SQLite + eventos JSONL + exportações JSON/CSV |
 
-Esses valores são **hipóteses iniciais de pesquisa**, não parâmetros otimizados nem recomendações de investimento. A especificação técnica completa será adicionada em `docs/SPEC.md`.
+Esses valores são **hipóteses iniciais de pesquisa**, não parâmetros otimizados nem recomendações de investimento. A especificação técnica completa está disponível em [`docs/SPEC.md`](docs/SPEC.md).
 
 ## Arquitetura Python
 
@@ -218,7 +218,7 @@ O futuro frontend em HTML poderá consumir `data/exports/dashboard-latest.json` 
 - [ ] Outcome Evaluator, rótulos amadurecidos e Learning Engine contextual.
 - [ ] Notícias, relatórios, JSONL/CSV/JSON, operação com systemd e testes de aceite.
 
-**Documentação de implementação (a publicar):** `docs/SPEC.md` definirá as regras e invariantes obrigatórias; `AGENTS.md` orientará os agentes de programação. Em caso de divergência, a especificação técnica será a referência para implementação.
+**Documentação de implementação:** [`docs/SPEC.md`](docs/SPEC.md) define as regras e invariantes obrigatórias; [`AGENTS.md`](AGENTS.md) orienta os agentes de programação. Em caso de divergência, a especificação técnica é a referência para implementação.
 
 ## Referências
 

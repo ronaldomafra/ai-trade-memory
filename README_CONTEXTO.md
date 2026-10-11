@@ -1,0 +1,19 @@
+# Pacote de contexto para agente de desenvolvimento
+
+Este pacote contém a especificação **da POC a ser implementada**, não a POC já pronta.
+
+## Arquivos
+- `AGENTS.md`: instruções curtas que devem ser lidas pelo agente automaticamente.
+- `docs/SPEC.md`: especificação completa, regras, arquitetura, persistência,
+  integração OpenRouter/JEV, aprendizado, etapas e critérios de aceite.
+
+## Uso
+1. Copie o conteúdo do pacote para a raiz de um repositório Python vazio.
+2. Inicie o Codex ou Claude Code na raiz desse repositório.
+3. Instrua-o a ler `AGENTS.md` e implementar o projeto conforme `docs/SPEC.md`,
+   pelos marcos, executando os testes de cada etapa.
+4. Forneça `OPENROUTER_API_KEY` **somente no ambiente local quando necessário**.
+5. A POC não deve conter credenciais de exchange nem enviar ordens reais.
+
+A futura interface HTML está fora do escopo; a implementação deve exportar
+JSON/CSV e manter eventos JSONL e SQLite para esse trabalho posterior.
