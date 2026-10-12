@@ -1,0 +1,23 @@
+[
+  {
+    "id": "559651",
+    "question": "Xi Jinping out before 2027?",
+    "conditionId": "0xa467b14d51f01b957109d9cbb1d6c124fab2a089d52ed8f471d23c2812e743b7",
+    "slug": "xi-jinping-out-before-2027",
+    "endDate": "2027-01-01T04:59:00Z",
+    "liquidity": "635767.76791",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.0285\", \"0.9715\"]",
+    "active": true,
+    "closed": false,
+    "updatedAt": "2026-10-11T16:04:46.534957Z",
+    "restricted": true,
+    "enableOrderBook": true,
+    "volume24hr": 22025.562608999997,
+    "clobTokenIds": "[\"32338220190071351435772801779725302244575775216413325951443816017994629993401\", \"25659310674993675562345759665114759892400026242514633218387667107987341231962\"]",
+    "spread": 0.001,
+    "lastTradePrice": 0.029,
+    "bestBid": 0.028,
+    "bestAsk": 0.029
+  }
+]
