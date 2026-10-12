@@ -1,6 +1,6 @@
 # Contexto de execução — desenho fechado
 
-**D051/D052/SPEC 1.50: documentação pronta; serviço ainda não implementado.** README terá comandos reais após implementação/testes. [Escopo](ESCOPO_POC_V1.md) · [Backlog](BACKLOG_IMPLEMENTACAO.md).
+**D051/D052/SPEC 1.50:** motor, controle REST/WS e TUI implementados/testados localmente; aceite externo/24h permanece no [status](STATUS_DESENVOLVIMENTO.md). Comandos e configuração no [guia de execução](GUIA_CONFIGURACAO_EXECUCAO.md). [Escopo](ESCOPO_POC_V1.md) · [Backlog](BACKLOG_IMPLEMENTACAO.md).
 
 ## Sessão
 

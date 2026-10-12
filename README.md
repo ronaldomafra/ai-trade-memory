@@ -1,8 +1,8 @@
 # ai-trade-memory
 
-**Contexto externo aprovado:** notícias e Polymarket com fatores separados e evidência curta, mesma base B/C; critérios e políticas D002/D018–D049 no [contrato vigente](docs/SPEC.md). P012 encerrado para discussão; detalhes técnicos serão resolvidos na implementação, de forma proporcional à POC. Implementação/validação pendentes.
+**Contexto externo aprovado:** notícias e Polymarket com fatores separados e evidência curta, mesma base B/C; critérios e políticas D002/D018–D049 no [contrato vigente](docs/SPEC.md). P012 encerrado para discussão; detalhes técnicos serão resolvidos na implementação, de forma proporcional à POC. Implementação integrada ao motor; validação semântica real e unidades monetárias Gamma ainda pendentes em E05.
 
-**D030 — suporte a outros ativos na V1:** um par Spot configurável com cotação USDT por sessão, selecionado antes de iniciar; BTC é exemplo/default. Banco, trio A/B/C e memória por símbolo permanecem separados. Quantidades, metadados, feeds, prompts e contexto usam o ativo destino. Retomada mantém o par salvo; transferência separada integra V1 conforme D052/SPEC 10.10. [Contrato vigente, seção 4.3](docs/SPEC.md). Implementação pendente.
+**D030 — suporte a outros ativos na V1:** um par Spot configurável com cotação USDT por sessão, selecionado antes de iniciar; BTC é exemplo/default. Banco, trio A/B/C e memória por símbolo permanecem separados. Quantidades, metadados, feeds, prompts e contexto usam o ativo destino. Retomada mantém o par salvo; transferência separada integra V1 conforme D052/SPEC 10.10. [Contrato vigente, seção 4.3](docs/SPEC.md). BTC/ETH validados em sessões e testes independentes.
 
 **Descoberta Polymarket D031:** até 100 registros/página e cinco requisições físicas por revisão inicial/60m, incluindo retries/todos os temas da sessão; até dez mercados acompanhados, mesma seleção B/C. Registrar limites/cobertura parcial e impedir loops. Detalhes e regras posteriores no [contrato vigente](docs/SPEC.md).
 
@@ -10,13 +10,47 @@
 
 > O mercado fornece os dados. O JEV avalia as decisões. O nosso motor de memória aprende com os resultados.
 
-**Status:** documentação V1 fechada; implementação pendente · **Linguagem:** Python 3.11+ · **Modo:** `PAPER_ONLY`
+**Status:** V1 em desenvolvimento; motor, transferência, API REST/WS e TUI disponíveis · **Linguagem:** Python 3.11+ · **Modo:** `PAPER_ONLY`
 
 ## Documentação fechada
 
 [Escopo V1](docs/ESCOPO_POC_V1.md) · [SPEC 1.50](docs/SPEC.md) · [Backlog técnico](docs/BACKLOG_IMPLEMENTACAO.md) · [Índice](docs/README.md).
 
-D050–D052 consolidam motores por sessão/Docker, orçamento global e V1 com transferência automática, REST/WSS/token/2FA e TUI remota após núcleo. [Plano ordenado E00–E11](docs/PLANO_DESENVOLVIMENTO_V1.md) · [Status](docs/STATUS_DESENVOLVIMENTO.md). Sem microaprovações; detalhes rotineiros são implementação/testes. Este repositório ainda contém documentação/referências: comandos abaixo descrevem a entrega prevista, não programas disponíveis ou integração testada.
+D050–D052 consolidam motores por sessão/Docker, orçamento global e V1 com transferência automática, REST/WSS/token/2FA e TUI remota após núcleo. [Plano ordenado E00–E11](docs/PLANO_DESENVOLVIMENTO_V1.md) · [Status](docs/STATUS_DESENVOLVIMENTO.md). Sem microaprovações; detalhes rotineiros são implementação/testes. Os módulos disponíveis estão na seção de execução atual; validações externas e aceite prolongado permanecem explícitos.
+
+## Instalação e execução disponíveis
+
+Siga o [guia de configuração e execução](docs/GUIA_CONFIGURACAO_EXECUCAO.md)
+para preparar .env, Docker, proprietário/2FA, TUI, sessões, datasets e recuperação.
+
+O núcleo offline possui broker Decimal, risco, SQLite/ledger/eventos, sessões isoladas e projeções. Motor, datasets, transferência e controle remoto estão implementados; TUI implementada e testada localmente; aceite integrado E11 pendente; progresso em [STATUS_DESENVOLVIMENTO.md](docs/STATUS_DESENVOLVIMENTO.md).
+
+Instale com uv (Python 3.11+ gerenciado pelo ambiente):
+
+```bash
+uv sync --locked
+uv run python -m poc --help
+uv run python -m poc config-check
+uv run pytest -q
+uv run ruff check src tests
+uv run python -m poc smoke-offline
+```
+
+O smoke padrão é V1_OFFLINE_PIPELINE: oito ciclos/24 decisões com indicadores, JEV/budget via transporte simulado, B/C compartilhados, broker/ledger, risco, labels 4/16 e exportação. Usa fixtures identificadas e não faz rede/inferência/cobrança real. Observações amadurecidas de fixture ficam fora da memória operacional, catálogo e dataset reutilizável. O cenário E01_ACCOUNTING permanece em `smoke-offline --scope accounting`. Ambos geram artefatos em sessões próprias, com 100 USDT iniciais por carteira.
+
+```bash
+# Prepara sessão somente após validar metadados públicos reais
+uv run python -m poc prepare-session --profile trend_15m_v1 --symbol ETHUSDT --run-id minha-sessao
+# Consultas identificam explicitamente a sessão
+uv run python -m poc status --run-id minha-sessao
+uv run python -m poc validate-data --run-id minha-sessao
+uv run python -m poc export --run-id minha-sessao --format all
+uv run python -m poc export-events --run-id minha-sessao --rebuild
+```
+
+.env.example descreve variáveis opcionais; configure segredos só em .env local/ambiente. POC_DATA_DIR muda a raiz dos caminhos padrão. A configuração efetiva/template/alterações/hash ficam na sessão; restaurar preserva o estado aceito. A CLI rejeita perfil desconhecido, run_id inválido, banco ausente e caminhos privados de exchange.
+
+Artefatos: data/sessions/RUN_ID/poc.sqlite3, logs/YYYY-MM-DD/events.jsonl e exports/{dashboard-latest.json,fills.csv,portfolio_equity.csv,ledger.csv}. Campos monetários são texto decimal. Sair da consulta não altera saldos. REST/WS/TUI estão disponíveis; acesso remoto exige proxy TLS. Dataset local está disponível. Engine e Docker estão disponíveis.
 
 ## Visão geral
 
@@ -90,7 +124,7 @@ A V1 usa **aprendizado estatístico e contextual**, não redes neurais nem ajust
 
 Pela [decisão D006](docs/DECISIONS.md), falta de bid válido nos 90s após o horizonte produz label `UNAVAILABLE`, excluído da memória, com motivo e cobertura reportados. Backfill de candles não substitui cotações ausentes; não há fonte histórica adicional na V1.
 
-Pela [decisão D007](docs/DECISIONS.md), importar/exportar [dataset acumulativo de aprendizado](docs/DATASET_APRENDIZADO.md) permite iniciar C com amostras compatíveis de outras execuções, mediante vínculo explícito que preserva a origem. Cada nova revisão reúne histórico válido e novos resultados amadurecidos, sem duplicar amostras ou sobrescrever versões. O arquivo histórico pode superar 60 dias; memória ativa mantém janela, símbolo, mínimos e contexto compacto. B e saldos não recebem histórico importado. Implementação pendente; transferência estatística separada integra V1 em D052/10.10, e D030 permite outros ativos na V1 em sessões independentes. Aumentar o acervo não comprova maior precisão.
+Pela [decisão D007](docs/DECISIONS.md), importar/exportar [dataset acumulativo de aprendizado](docs/DATASET_APRENDIZADO.md) permite iniciar C com amostras compatíveis de outras execuções, mediante vínculo explícito que preserva a origem. Cada nova revisão reúne histórico válido e novos resultados amadurecidos, sem duplicar amostras ou sobrescrever versões. O arquivo histórico pode superar 60 dias; memória ativa mantém janela, símbolo, mínimos e contexto compacto. B e saldos não recebem histórico importado. Import/export implementados; transferência estatística separada integra V1 em D052/10.10, e D030 permite outros ativos na V1 em sessões independentes. Aumentar o acervo não comprova maior precisão.
 
 Pela [decisão D008](docs/DECISIONS.md), preservar memória específica por ativo. O pedido posterior D052 inclui transferência automática separada na V1, com normalização, origem, validação prospectiva e ativação/suspensão em [TRANSFERENCIA_APRENDIZADO.md](docs/TRANSFERENCIA_APRENDIZADO.md). Não somar amostras BTC aos mínimos locais de outra moeda; melhoria exige avaliação real.
 
@@ -122,17 +156,17 @@ Pela [decisão D004](docs/DECISIONS.md), a trava diária usa caixa mais o ativo 
 
 ## Arquitetura Python
 
-A [base hexagonal com Docker Compose](docs/ARQUITETURA.md) está aprovada em P016/D012: núcleo separado das integrações, um motor/container por sessão e armazenamento local persistente. Ainda não há bot ou deploy Docker implementado. D011 aprova o primeiro perfil contínuo `trend_15m_v1`; o segundo perfil e protocolo do orçamento global permanecem em definição.
+A [base hexagonal com Docker Compose](docs/ARQUITETURA.md) está aprovada em P016/D012: núcleo separado das integrações, um motor/container por sessão e armazenamento local persistente. Motor e Docker implementados, um banco por sessão e orçamento global compartilhado. D011 define `trend_15m_v1`; outro estilo exige contrato e implementação próprios.
 
-O projeto está planejado como um serviço modular, sem frontend e sem dependências de infraestrutura desnecessárias:
+O projeto é modular, com TUI como cliente REST/WS e motores independentes:
 
 ```text
 ai-trade-memory/
 ├── AGENTS.md                 # Orientações para agentes de programação
 ├── README.md
 ├── pyproject.toml
-├── Dockerfile                # Imagem comum (prevista)
-├── compose.yaml              # Um motor por sessão (previsto)
+├── Dockerfile                # Imagem comum
+├── compose.yaml              # Um motor por sessão
 ├── .env.example
 ├── config/
 │   └── default.yaml
@@ -269,7 +303,7 @@ O futuro frontend HTML poderá consumir `data/sessions/RUN_ID/exports/dashboard-
 
 **Documentação de implementação:** [`docs/SPEC.md`](docs/SPEC.md) define as regras e invariantes obrigatórias; [`AGENTS.md`](AGENTS.md) orienta os agentes de programação. Em caso de divergência, a especificação técnica é a referência para implementação.
 
-**Contextos de desenvolvimento e operação:** [`docs/README.md`](docs/README.md) organiza a pesquisa de estilos de trade, as instruções para desenvolvimento e execução, o conteúdo proposto para uma futura TUI e os pontos reservados para discussão. Outros perfis dependem de contratos próprios; a TUI V1 está definida e aguarda implementação.
+**Contextos de desenvolvimento e operação:** [`docs/README.md`](docs/README.md) organiza a pesquisa de estilos de trade, as instruções para desenvolvimento e execução, o uso da TUI e os registros de decisões. Outros perfis dependem de contratos próprios; a TUI V1 está implementada e testada localmente.
 
 ## Referências
 
@@ -281,3 +315,195 @@ O futuro frontend HTML poderá consumir `data/sessions/RUN_ID/exports/dashboard-
 ---
 
 *ai-trade-memory — decisões probabilísticas, memória própria e evidência mensurável.*
+
+## Motor contínuo e diagnóstico JEV
+
+```bash
+uv run python -m poc run --new-session --profile trend_15m_v1 --symbol ETHUSDT --run-id eth-01
+uv run python -m poc run --resume eth-01 --serve
+uv run python -m poc backfill --run-id eth-01 --days 7
+uv run python -m poc smoke-openrouter
+docker compose up -d engine_btc
+docker compose stop engine_btc
+```
+
+Compose restaura sessões previamente preparadas (`session-btc` e, no perfil `parallel`, `session-eth`), cada uma com seu SQLite/volume. Sem portas públicas; API interna usa 8081. Prepare os bancos pelo CLI antes do Compose. Alternativa systemd em deploy/jev-paper-trading@.service; ajuste usuário/caminhos locais e use apenas um supervisor por sessão. SIGTERM encerra tarefas e projeta eventos; fechar consultas não encerra o engine.
+
+Configure OPENROUTER_API_KEY localmente. Smoke faz no máximo uma tentativa física, registra a cobrança observada e nunca chama o broker. HTTP 401/402/403 abre circuito persistido vinculado à credencial; corrigir a chave libera uma identidade de credencial nova. Não usar Binance keys. O orçamento global em data/operational/ai-budget.sqlite3 limita todas as sessões a 240 tentativas e US$ 0,05 observado/dia UTC. Custos ausentes ficam unknown; não há garantia de teto absoluto de fatura com cobrança desconhecida. Logs/exports incluem decisões, ai_calls e custos sem credenciais.
+
+## Memória e datasets
+
+```bash
+uv run python -m poc import-learning --run-id eth-01 --input data/datasets/r001.jsonl
+uv run python -m poc export-learning --run-id eth-01 --output data/datasets/r002.jsonl
+uv run python -m poc evaluate-outcomes --run-id eth-01
+```
+
+Importe antes da primeira decisão ou selecione learning.initial_dataset_path no YAML antes de preparar. Sem arquivo, a sessão começa sem memória; restauração usa os dados aceitos no SQLite e não relê o arquivo. Export não sobrescreve versões existentes. Finanças nunca são importadas. Labels usam bid registrado nos 90s após maturação; candle histórico não fabrica uma cotação faltante. Sem amostras locais suficientes, C continua sem feedback útil. Origem estrangeira permanece arquivada; transferência automática usa uma camada separada com gates prospectivos. A camada estatística local declara dependência entre candles/horizontes.
+
+## Contexto externo e relatórios
+
+Coleta de RSS/Marketaux roda separada do risco. Marketaux usa somente a conta gratuita (100 requisições/dia compartilhadas e até três itens na primeira página), com truncamento explícito; token pode ser preenchido depois. Conteúdo novo/alterado é classificado pela Decisions API dentro do orçamento global e reutilizado. As decisões recebem fatores e evidência curta; artigos integrais e dados futuros não entram no prompt. B/C usam o mesmo snapshot externo. Sem fatores por falha/pendência, compras B/C ficam bloqueadas; saídas de risco continuam.
+
+Polymarket usa apenas Gamma /markets, CLOB /book e Data /v2/trades públicos por GET. Proxy opcional fica em POLYMARKET_PROXY_URL no .env local; nunca em código ou export. Unidade Gamma ainda não suficientemente documentada nas referências verificadas: métricas bare permanecem UNVERIFIED, excluindo o sinal quantitativo até comprovação de unidade/semântica. Isso não impede fatores válidos de notícias.
+
+Janela de notícias ajustada antes da sessão é respeitada na consulta/filtro/validade.
+ID de evento Polymarket é referência inicial: associação literal requer pergunta e
+regras completas iguais; grupos ambíguos ficam pendentes. Filtros precedem vagas e
+seleção tem auditoria persistida. Deltas 5/60m usam livros realmente observados;
+referência faltante aparece como indisponível. Datas de ocorrência exigem evidência
+explícita; publicação/resolução não dão horário de acontecimento automaticamente.
+
+Dashboard/CSV incluem decisões propostas/aprovadas/executadas, memória/outcomes, custo físico USD separado de patrimônio virtual USDT, comparação C−B/B−A e cobertura. Essas diferenças observadas não demonstram causalidade ou rentabilidade. Dados de fonte e classificação ficam auditáveis; falhas isoladas não apagam fatores elegíveis de outras fontes.
+
+## Lifecycle e backups
+
+```bash
+uv run python -m poc start-engine --run-id minha-sessao
+uv run python -m poc engine-status --run-id minha-sessao
+uv run python -m poc stop-engine --run-id minha-sessao
+uv run python -m poc backup --run-id minha-sessao --output data/backups/minha-sessao-r001
+POC_DATA_DIR=/tmp/restore-isolado uv run python -m poc restore-backup --run-id minha-sessao --input data/backups/minha-sessao-r001
+```
+
+Runtime requer Docker no servidor e imagem local previamente construída; não baixa imagem automaticamente. Container usa UID/GID do operador, bind mount próprio e API em porta loopback alocada. Compose fornece alternativa de serviços explícitos para session-btc/session-eth; evite supervisores concorrentes. Credenciais são passadas somente por nomes de variáveis permitidos, sem valor em argumentos/comandos persistidos.
+
+Alterar segredos no .env exige reiniciar o controle/processo nativo e recriar
+containers dos motores preservando bancos/volumes: o ambiente é lido na partida,
+e docker restart sozinho mantém o ambiente antigo do container. Chave JEV nova
+usa outra identidade no circuito persistido, sem apagar orçamento/auditoria.
+
+Backups incluem SQLite canônico e bases operacionais existentes, cada arquivo com seu próprio corte consistente; não há transação conjunta entre bancos. Arquivos/projeções não substituem o ledger. Restore preserva identidade e capital e rejeita destino existente/corrompido. Se precisar reconstruir orçamento/quota, bloqueia novas chamadas IA/Marketaux até o próximo dia UTC para não gastar capacidade incerta; RSS e risco/paper continuam. Não sobrescreve orçamento atual com backup antigo. Faça recuperação em diretório isolado, confira validate-data e só então planeje substituição do serviço parado.
+
+## Transferência automática entre moedas
+
+O engine publica exemplos maduros válidos em data/learning/catalog.sqlite3 por outbox; importação inicial continua fixa, sem reimportação por candle. Transferência é uma camada separada, ativada no template, ajustável antes da sessão. Fonte estrangeira nunca entra nos mínimos locais. Sem fontes, C segue sem complemento.
+
+Padrões estrangeiros exigem 50 exemplos não neutros compatíveis. C salva previsões sombra sem IA/trade adicional; só usa o padrão após 30 avaliações futuras não sobrepostas e Brier estritamente melhor que o baseline salvo. Igualdade/piora/falta de cobertura suspendem o uso; locals têm prioridade e o contexto tem até três padrões totais. Não transfere carteira, pesos JEV ou aprovação ACTIVE para nova sessão. Diagnóstico: uv run python -m poc transfer-status --run-id minha-sessao. CSV de transfer_shadows/transfer_states inclui proveniência e métricas; catálogo/estados entram no backup.
+
+## Controle e TUI V1
+
+Proprietário de produção é configurado por você localmente; nenhum usuário/senha
+padrão é criado pela aplicação. Configure o autenticador com a seed/URI exibida
+pelo bootstrap, sem copiar esse segredo para logs/documentação:
+
+```bash
+uv run python -m poc bootstrap-owner --username meu-usuario
+uv run python -m poc control-api --port 8080
+# Em outro terminal; a TUI não precisa das chaves OpenRouter/Marketaux:
+uv run python -m poc tui --server http://127.0.0.1:8080
+```
+
+`serve-control` é alias de `control-api`. Se a porta estiver ocupada, escolha outra
+em ambos os comandos. Login usa senha e TOTP. Tokens ficam na memória da TUI;
+refresh é rotativo. Recuperação do autenticador, exclusivamente no servidor:
+`uv run python -m poc reset-owner-2fa --username meu-usuario`. A troca revoga tokens
+anteriores. Banco de auth em data/control, separado dos motores; protege seed
+TOTP e hashes com permissões locais restritas.
+
+Na TUI: selecione sessão para visualizar; N cria com perfil/par/defaults e ajustes
+JSON antes da partida, dataset opcional e transferência configurável. S inicia
+ou retoma a sessão selecionada preservando banco/dinheiro/configuração. D abre
+import/export; import inicial é bloqueado após a primeira decisão, export não
+sobrescreve arquivo local. R atualiza; Tab navega; abas mostram decisões, memória,
+eventos com filtro e configuração readonly; ? ajuda; O faz logout; Q sai.
+Fechar a TUI ou o gateway não para motor. Parada explícita:
+`uv run python -m poc stop-engine --run-id MINHA_SESSAO` no servidor, ou REST stop.
+
+REST cuida dos comandos/snapshots/datasets; WS traz replay por cursor e dados
+observáveis. Mercado/ledger são lidos do backend; nenhum saldo da imagem é usado.
+Sem cotação/heartbeat atual, interface mantém diagnóstico de falta de atualização.
+Contratos, limites e endpoints em [API_CONTROLE_V1.md](docs/API_CONTROLE_V1.md).
+[Captura real](docs/relatorios/tui-v1-dashboard.svg) e
+[terminal menor](docs/relatorios/tui-v1-terminal-pequeno.svg), ensaio E10.
+
+### Controle em Docker e hospedagem posterior
+
+Em Linux, a imagem do controle inclui apenas o CLI Docker além da base comum:
+
+```bash
+docker build -t ai-trade-memory:0.1.0 .
+docker compose --profile control build control_api
+export POC_UID="$(id -u)" POC_GID="$(id -g)"
+export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+export POC_HOST_DATA_DIR="$PWD/data"
+# Mesmo diretório no host e no mount /data do controle; usa 8080 por padrão.
+export POC_CONTROL_PORT=8080
+docker compose --profile control up -d control_api
+```
+
+O controle acessa o socket para lifecycle somente no servidor; a TUI usa a API.
+Bind do controle mapeia POC_HOST_DATA_DIR para /data e o runtime utiliza o caminho
+real do host nos mounts dos motores. Os motores montam somente sua sessão,
+operational e learning, sem pasta control/auth; porta da API do motor em loopback.
+Não rode outro supervisor para o mesmo run_id.
+
+Para acesso remoto, configure DNS seu e proxy TLS (sem expor motores):
+
+```bash
+export POC_PUBLIC_HOST=seu-dominio.example
+docker compose --profile control --profile remote up -d control_api tls_proxy
+uv run python -m poc tui --server https://seu-dominio.example
+```
+
+Caddyfile validado localmente; domínio/certificado público e estabilidade externa
+não foram testados. HTTP remoto é recusado. A aplicação não instala firewall ou
+publica domínio por conta própria. Segredos seguem .env/ambiente privados.
+
+## Validação atual e limites
+
+191 testes conjuntos passaram após integrar REST/WS/TUI e revisar contexto/E11; casos sintéticos
+ficam exclusivamente em fixtures/temporários e não entram no catálogo operacional.
+Binance REST/WS e Docker/lifecycle/backup/restore têm ensaios reais locais. Gateway
+nativo e em Docker preservaram motores no logout/SIGTERM; cliente TUI exibiu sessão
+real. [Status/evidências](docs/STATUS_DESENVOLVIMENTO.md) detalham cada etapa.
+
+OpenRouter autenticado respondeu 401 no ensaio: integração com resposta válida
+continua pendente e a chave rejeitada não é reenviada indefinidamente. Token
+Marketaux fica para preenchimento posterior pelo usuário; RSS tem cobertura
+parcial explícita. Gamma/CLOB/Data Polymarket acessíveis pelo proxy local, mas
+campos Gamma com unidade USD não suficientemente documentada permanecem excluídos
+dos sinais quantitativos. Não há prova de ACTIVE transferido/rentabilidade real.
+O ensaio obrigatório de 24 horas ainda não foi concluído; não declarar aceite
+operacional desassistido antes dessa evidência.
+
+### Atualização de imagens e observação prolongada
+
+Depois de atualizar código/schema, reconstrua a imagem e recrie containers
+parados preservando os mesmos volumes. O runtime rejeita início de container
+parado com imagem diferente da tag atual; não migra banco para código antigo.
+Em Compose: `docker compose up -d --force-recreate engine_btc` (idem engine_eth).
+Para runtime dinâmico, pare explicitamente e remova somente o container
+identificado por engine-status, sem remover volumes/diretório; start-engine
+recria usando o banco aceito. Backup/restore permanece disponível.
+
+Ensaio E11 iniciado com sessões próprias acceptance-v1-btc e acceptance-v1-eth.
+São novos trios de paper, com configurações/identidades isoladas. Consultar:
+
+```bash
+uv run python -m poc engine-status --run-id acceptance-v1-btc
+uv run python -m poc status --run-id acceptance-v1-btc
+uv run python -m poc validate-data --run-id acceptance-v1-btc
+uv run python -m poc validate-data --run-id acceptance-v1-eth
+```
+
+Início não equivale a conclusão de 24h. JEV rejeitado/Marketaux ausente e métricas
+Gamma não verificadas continuam registrados; decisões técnicas e proteção
+funcionam com fontes públicas disponíveis. Nenhuma rentabilidade ou homologação
+é presumida.
+
+Observador readonly, sem lifecycle ou novas inferências, grava amostras periódicas
+de saúde, auditoria/capital, duplicidade, cutoff da memória/fills, custos/fontes e
+imagem. Use uma pasta nova para cada ensaio:
+
+```bash
+uv run python -m poc observe --run-id acceptance-v1-btc --run-id acceptance-v1-eth \
+  --output data/acceptance/MEU_ENSAIO --duration-hours 24 --poll-seconds 60
+```
+
+Observação final corrente em `data/acceptance/v1-20261012-final/observation.json`,
+iniciada 12/10/2026 21:57 UTC; mínimo previsto 13/10 21:57 UTC (18:57 Brasília).
+`COMPLETED` significa tempo de relógio decorrido; revise amostras de degradação e
+limitações das fontes antes do aceite. Parar o observador não para motores.
+[Relatório E05/E11](docs/relatorios/VALIDACAO_E05_E11.md) registra a prévia, retomadas,
+backup/restore e dataset real BTC→ETH, sem afirmar transferência ACTIVE ou lucro.

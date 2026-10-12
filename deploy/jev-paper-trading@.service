@@ -1,0 +1,21 @@
+[Unit]
+Description=Paper trading engine session %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=poc
+WorkingDirectory=/opt/ai-trade-memory
+EnvironmentFile=-/etc/ai-trade-memory.env
+ExecStart=/opt/ai-trade-memory/.venv/bin/python -m poc run --resume %i
+Restart=always
+RestartSec=10
+TimeoutStopSec=40
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ai-trade-memory/data
+
+[Install]
+WantedBy=multi-user.target

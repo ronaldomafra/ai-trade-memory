@@ -1,0 +1,85 @@
+name: ai-trade-memory
+services:
+  control_api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.control
+    image: ai-trade-memory-control:0.1.0
+    profiles: ["control"]
+    network_mode: host
+    command: ["serve-control", "--host", "127.0.0.1", "--port", "${POC_CONTROL_PORT:-8080}"]
+    user: "${POC_UID:-1000}:${POC_GID:-1000}"
+    group_add: ["${DOCKER_GID:-999}"]
+    environment:
+      POC_DATA_DIR: /data
+      POC_HOST_DATA_DIR: ${POC_HOST_DATA_DIR:-${PWD}/data}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MARKETAUX_API_TOKEN: ${MARKETAUX_API_TOKEN:-}
+      POLYMARKET_PROXY_URL: ${POLYMARKET_PROXY_URL:-}
+    volumes:
+      - ${POC_HOST_DATA_DIR:-${PWD}/data}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    stop_grace_period: 40s
+  tls_proxy:
+    image: caddy:2
+    profiles: ["remote"]
+    network_mode: host
+    environment:
+      POC_PUBLIC_HOST: ${POC_PUBLIC_HOST:-localhost}
+      POC_CONTROL_PORT: ${POC_CONTROL_PORT:-8080}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    restart: unless-stopped
+  engine_btc:
+    labels:
+      poc.owner: ai-trade-memory
+      poc.run_id: session-btc
+    build: .
+    image: ai-trade-memory:0.1.0
+    user: "${POC_UID:-1000}:${POC_GID:-1000}"
+    command: ["run", "--resume", "session-btc", "--serve", "--host", "0.0.0.0"]
+    environment:
+      POC_DATA_DIR: /data
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MARKETAUX_API_TOKEN: ${MARKETAUX_API_TOKEN:-}
+      POLYMARKET_PROXY_URL: ${POLYMARKET_PROXY_URL:-}
+    volumes:
+      - ./data/sessions/session-btc:/data/sessions/session-btc
+      - ./data/operational:/data/operational
+      - ./data/learning:/data/learning
+    restart: unless-stopped
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; x=json.load(urllib.request.urlopen('http://127.0.0.1:8081/health',timeout=3)); assert x['status']=='RUNNING' and x['quote_fresh']"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+  engine_eth:
+    labels:
+      poc.owner: ai-trade-memory
+      poc.run_id: session-eth
+    image: ai-trade-memory:0.1.0
+    profiles: ["parallel"]
+    user: "${POC_UID:-1000}:${POC_GID:-1000}"
+    command: ["run", "--resume", "session-eth", "--serve", "--host", "0.0.0.0"]
+    environment:
+      POC_DATA_DIR: /data
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MARKETAUX_API_TOKEN: ${MARKETAUX_API_TOKEN:-}
+      POLYMARKET_PROXY_URL: ${POLYMARKET_PROXY_URL:-}
+    volumes:
+      - ./data/sessions/session-eth:/data/sessions/session-eth
+      - ./data/operational:/data/operational
+      - ./data/learning:/data/learning
+    restart: unless-stopped
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; x=json.load(urllib.request.urlopen('http://127.0.0.1:8081/health',timeout=3)); assert x['status']=='RUNNING' and x['quote_fresh']"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

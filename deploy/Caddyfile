@@ -1,0 +1,4 @@
+# Optional public gateway; set your own DNS name before enabling this profile.
+{$POC_PUBLIC_HOST} {
+    reverse_proxy 127.0.0.1:{$POC_CONTROL_PORT}
+}
