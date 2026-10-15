@@ -9,9 +9,12 @@ from poc.domain.features import rsi_bucket, volume_bucket
 from poc.domain.learning import compatible_group, hold_return, net_entry_return, statistics
 from poc.domain.models import MarketMetadata
 from poc.domain.primitives import canonical_json, decimal, floor_step, iso, stable_id, utc
+from poc.domain.profiles import parameters, seconds
 
 
 def learning_protocol(config: Config) -> str:
+    if parameters(config):
+        return stable_id("profile_learning_v2", config.profile_definition.model_dump(mode="json"))
     return stable_id(
         "labels_v1",
         "indicators_v1",
@@ -116,6 +119,10 @@ class LearningEngine:
                     maturity = at.replace(
                         minute=at.minute // 15 * 15, second=0, microsecond=0
                     ) + timedelta(minutes=15 * horizon)
+                    if parameters(self.config):
+                        maturity = utc(decision["candle_close_time"]) + timedelta(
+                            seconds=seconds(self.config) * horizon
+                        )
                     reference = {
                         "symbol": self.metadata.symbol,
                         "base_asset": self.metadata.base_asset,
@@ -149,6 +156,19 @@ class LearningEngine:
                         "slippage_fraction": str(slippage),
                         "fixture": bool(self.store.run()["market_metadata"]["raw"].get("fixture")),
                     }
+                    if parameters(self.config):
+                        identity = self.config.profile_definition.profile
+                        reference.update(
+                            profile_id=identity.profile_id,
+                            profile_version=str(identity.version),
+                            interval=self.config.market.interval,
+                            label_version="profile_labels_v2",
+                            equivalence_version="profile_equivalence_v2",
+                            interval_seconds=seconds(self.config),
+                            trend_interval=self.config.market.trend_interval,
+                            reference_candle_close_time=decision["candle_close_time"],
+                            outcome_quote_window_seconds=self.config.learning.outcome_quote_window_seconds,
+                        )
                     self.store.save_pending_outcome(
                         {
                             "outcome_id": stable_id("outcome", decision["decision_id"], horizon),
@@ -171,8 +191,13 @@ class LearningEngine:
         for outcome in self.store.pending_outcomes(now):
             reference = outcome["reference"]
             maturity = utc(outcome["maturity_time"])
-            quote = self.store.first_maturity_quote(reference["symbol"], maturity, now)
-            if quote is None and utc(now) < maturity + timedelta(seconds=90):
+            window = reference.get("outcome_quote_window_seconds", 90)
+            quote = (
+                self.store.first_maturity_quote(reference["symbol"], maturity, now, window)
+                if parameters(self.config)
+                else self.store.first_maturity_quote(reference["symbol"], maturity, now)
+            )
+            if quote is None and utc(now) < maturity + timedelta(seconds=window):
                 continue
             core, origin = None, None
             if quote:
@@ -188,7 +213,7 @@ class LearningEngine:
                 )
                 # The economic example excludes source identity; all eligible origins are retained.
                 core = {**reference, "exit_quote": asdict(quote), "return_pct": str(result)}
-                core["sample_id"] = stable_id("equivalence_v1", core)
+                core["sample_id"] = stable_id(reference["equivalence_version"], core)
                 origin = {
                     "origin_id": stable_id(
                         "origin",
@@ -210,9 +235,22 @@ class LearningEngine:
                         "simulation": self.config.simulation.model_dump(mode="json"),
                     },
                 }
+                if parameters(self.config):
+                    origin["protocol_parameters"] = self.config.model_dump(mode="json")
+                    origin["protocol_parameters"]["learning"]["initial_dataset_path"] = None
             with self.store.transaction():
                 self.store.finish_outcome(
-                    outcome, now, core, origin, "MATURED" if quote else "NO_BID_IN_90S_WINDOW"
+                    outcome,
+                    now,
+                    core,
+                    origin,
+                    "MATURED"
+                    if quote
+                    else (
+                        "NO_BID_IN_PROFILE_WINDOW"
+                        if parameters(self.config)
+                        else "NO_BID_IN_90S_WINDOW"
+                    ),
                 )
             completed += 1
         return completed
@@ -223,7 +261,7 @@ class LearningEngine:
         base = {
             "learning_version": "memory_v1",
             "source_cutoff_at": iso(cutoff),
-            "primary_horizon_bars": 4,
+            "primary_horizon_bars": self.config.learning.primary_horizon_bars,
             "patterns": [],
         }
         if not self.config.learning.enabled:

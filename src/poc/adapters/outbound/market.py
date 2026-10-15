@@ -95,11 +95,21 @@ def parse_metadata(payload: dict[str, Any], symbol: str, now: datetime) -> Marke
 
 class BinancePublic:
     def __init__(
-        self, client: httpx.AsyncClient | None = None, now: Callable[[], datetime] | None = None
+        self,
+        client: httpx.AsyncClient | None = None,
+        now: Callable[[], datetime] | None = None,
+        intervals: tuple[str, str] = ("15m", "1h"),
+        max_candle_pages: int = 5,
     ):
         self.client = client or httpx.AsyncClient(timeout=10, follow_redirects=False)
         self.owns_client = client is None
         self.now = now or (lambda: datetime.now(UTC))
+        if any(i not in INTERVAL_SECONDS for i in intervals):
+            raise DomainError("Unsupported subscription interval")
+        self.intervals = intervals
+        if not 1 <= max_candle_pages <= 5:
+            raise DomainError("Candle pagination is bounded to five pages")
+        self.max_candle_pages = max_candle_pages
 
     async def close(self) -> None:
         if self.owns_client:
@@ -143,8 +153,39 @@ class BinancePublic:
     async def candles(
         self, symbol: str, interval: str, limit: int = 600, start_at: datetime | None = None
     ) -> list[Candle]:
-        if interval not in INTERVAL_SECONDS or not 1 <= limit <= 1000:
+        if interval not in INTERVAL_SECONDS or not 1 <= limit <= 4995:
             raise DomainError("Invalid candle query")
+        if limit > 999:
+            rows = []
+            end = None
+            for _ in range(self.max_candle_pages):
+                params = {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "limit": min(1000, limit - len(rows) + 1),
+                }
+                if start_at is not None:
+                    params["startTime"] = int(utc(start_at).timestamp() * 1000)
+                elif end is not None:
+                    params["endTime"] = end
+                payload = await self.get("/api/v3/klines", params)
+                received = self.now()
+                page = [parse_kline(row, symbol, interval, received) for row in payload]
+                page = [r for r in page if r.is_closed]
+                if not page:
+                    break
+                known = {r.open_time for r in rows}
+                fresh = [r for r in page if r.open_time not in known]
+                if not fresh:
+                    raise DomainError("Candle pagination made no progress")
+                rows.extend(fresh)
+                if len(rows) >= limit:
+                    break
+                if start_at is not None:
+                    start_at = page[-1].close_time_exclusive
+                else:
+                    end = int(page[0].open_time.timestamp() * 1000) - 1
+            return sorted(rows, key=lambda r: r.open_time)[-limit:]
         params: dict[str, Any] = {
             "symbol": symbol,
             "interval": interval,
@@ -169,7 +210,7 @@ class BinancePublic:
         lower = symbol.lower()
         url = (
             "wss://data-stream.binance.vision:443/stream?streams="
-            f"{lower}@bookTicker/{lower}@kline_15m/{lower}@kline_1h"
+            f"{lower}@bookTicker/{lower}@kline_{self.intervals[0]}/{lower}@kline_{self.intervals[1]}"
         )
         delay = 1.0
         while not stop.is_set():

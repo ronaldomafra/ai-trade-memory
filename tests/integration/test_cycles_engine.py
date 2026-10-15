@@ -11,6 +11,7 @@ from poc.application.orchestrator import CycleCoordinator, cycle_identity
 from poc.domain.candles import Candle
 from poc.domain.features import Features
 from poc.domain.models import Action, Proposal
+from poc.domain.primitives import DomainError
 
 
 class Clock:
@@ -217,6 +218,78 @@ async def test_startup_backfill_and_old_candles_do_not_trade(tmp_path):
     assert await engine.accept_candle(next_bar)
     assert not await engine.accept_candle(next_bar)
     assert engine.queue.qsize() == 1
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_handles_volume_revision_without_rewriting_history_or_replaying(tmp_path):
+    cfg, _, db, _ = setup(tmp_path)
+    clock = Clock(NOW + timedelta(seconds=1))
+    original = current_candle()
+    with db.transaction():
+        db.save_candle(original)
+
+    class RevisedSource(Source):
+        async def candles(self, symbol, interval, limit=600, start_at=None):
+            rows = await super().candles(symbol, interval, limit, start_at)
+            return [
+                replace(row, volume=D("11.00"))
+                if row.interval == "15m" and row.open_time == original.open_time
+                else row
+                for row in rows
+            ]
+
+    engine = LiveEngine(cfg, meta(), db, RevisedSource(clock), clock)
+    await engine.initialize()
+    clock.at += timedelta(seconds=1)
+    await engine.recover_history()
+    stored = next(
+        row for row in db.candles("BTCUSDT", "15m") if row.open_time == original.open_time
+    )
+    assert stored == original
+    assert engine.status == "RUNNING" and engine.queue.empty()
+    revisions = [
+        row for row in db.events() if row["event_type"] == "CANDLE_VOLUME_REVISION_IGNORED"
+    ]
+    assert len(revisions) == 1
+    assert db.connection.execute("SELECT count(*) FROM decision_cycles").fetchone()[0] == 0
+    assert db.audit()["ok"] and db.audit()["fill_count"] == 0
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_later_volume_observation_does_not_queue_a_second_decision(tmp_path):
+    cfg, _, db, _ = setup(tmp_path)
+    clock = Clock(NOW + timedelta(seconds=1))
+    engine = LiveEngine(cfg, meta(), db, Source(clock), clock)
+    await engine.initialize()
+    clock.at = NOW + timedelta(minutes=15)
+    candle = replace(
+        current_candle(), open_time=NOW, close_time_exclusive=clock.now(), available_at=clock.now()
+    )
+    assert await engine.accept_candle(candle)
+    for volume in (D("11.00"), D("11.0000")):
+        clock.at += timedelta(seconds=1)
+        assert not await engine.accept_candle(
+            replace(candle, volume=volume, available_at=clock.now())
+        )
+    assert engine.queue.qsize() == 1
+    assert db.candles("BTCUSDT", "15m", 1)[0] == candle
+    revisions = [r for r in db.events() if r["event_type"] == "CANDLE_VOLUME_REVISION_IGNORED"]
+    assert len(revisions) == 1 and db.audit()["fill_count"] == 0
+    db.close()
+
+
+def test_price_conflict_still_fails_closed_and_retains_original_candle(tmp_path):
+    _, _, db, _ = setup(tmp_path)
+    candle = current_candle()
+    with db.transaction():
+        db.save_candle(candle)
+    with pytest.raises(DomainError, match="Conflicting finalized candle"):
+        with db.transaction():
+            db.save_candle(replace(candle, close=candle.close + 1))
+    assert db.candles("BTCUSDT", "15m", 1)[0] == candle
+    assert db.audit()["ok"] and db.audit()["fill_count"] == 0
     db.close()
 
 

@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from poc.application.learning import learning_protocol
-from poc.config import Config
+from poc.config import parse_config
 from poc.domain.dataset import encoded_records, records_hash, validate_record
 from poc.domain.primitives import DomainError, canonical_json, iso, stable_id, utc
 
@@ -43,7 +43,7 @@ def read_dataset(path: Path, cutoff: datetime) -> dict:
             or set(header) != HEADER_FIELDS
             or header["record_type"] != "dataset_metadata"
             or type(header["schema_version"]) is not int
-            or header["schema_version"] != 1
+            or header["schema_version"] not in (1, 2)
         ):
             raise DomainError("Unsupported dataset metadata schema")
         if (
@@ -53,7 +53,7 @@ def read_dataset(path: Path, cutoff: datetime) -> dict:
         ):
             raise DomainError("Dataset integrity or cutoff is invalid")
         identity = {k: v for k, v in header.items() if k != "dataset_id"}
-        if header["dataset_id"] != stable_id("dataset_v1", identity):
+        if header["dataset_id"] != stable_id("dataset_v" + str(header["schema_version"]), identity):
             raise DomainError("Dataset identity mismatch")
         if (
             type(header["revision"]) is not int
@@ -72,9 +72,36 @@ def read_dataset(path: Path, cutoff: datetime) -> dict:
             record = json.loads(line)
             validate_record(record, utc(header["export_cutoff_at"]))
             for origin in record["origins"]:
-                source_config = Config.model_validate(origin["protocol_parameters"])
+                source_config = parse_config(origin["protocol_parameters"])
                 if learning_protocol(source_config) != record["core"]["protocol_hash"]:
                     raise DomainError("Origin protocol does not match example")
+                if record["core"]["label_version"] == "profile_labels_v2":
+                    core = record["core"]
+                    definition = source_config.profile_definition
+                    features = core["features"]
+                    if (
+                        features.get("decision_interval") != core["interval"]
+                        or features.get("trend_interval") != core["trend_interval"]
+                        or features.get("rsi_period") != source_config.indicators.rsi
+                        or list(features.get("return_horizons_bars", []))
+                        != list(source_config.indicators.return_horizons_bars)
+                        or len(features.get("returns_pct", []))
+                        != len(source_config.indicators.return_horizons_bars)
+                    ):
+                        raise DomainError(
+                            "Feature duration/indicator metadata does not match its origin"
+                        )
+                    if (
+                        core["interval"] != source_config.market.interval
+                        or core["trend_interval"] != source_config.market.trend_interval
+                        or core["profile_id"] != definition.profile.profile_id
+                        or core["profile_version"] != str(definition.profile.version)
+                        or core["horizon_bars"]
+                        not in source_config.learning.evaluation_horizons_bars
+                        or core["outcome_quote_window_seconds"]
+                        != source_config.learning.outcome_quote_window_seconds
+                    ):
+                        raise DomainError("Profile label metadata does not match its origin")
                 if source_config.simulation.trading_fee_pct_per_side / 100 != Decimal(
                     record["core"]["fee_fraction"]
                 ) or source_config.simulation.slippage_pct_per_side / 100 != Decimal(
@@ -184,7 +211,9 @@ class DatasetFiles:
                 composition[symbol] = composition.get(symbol, 0) + 1
             header = {
                 "record_type": "dataset_metadata",
-                "schema_version": 1,
+                "schema_version": 2
+                if any(r["core"]["label_version"] == "profile_labels_v2" for r in records)
+                else 1,
                 "revision": 1
                 + max(
                     [
@@ -209,7 +238,7 @@ class DatasetFiles:
                     ).fetchone()[0],
                 },
             }
-            header["dataset_id"] = stable_id("dataset_v1", header)
+            header["dataset_id"] = stable_id("dataset_v" + str(header["schema_version"]), header)
         finally:
             self.db.connection.rollback()
         path.parent.mkdir(parents=True, exist_ok=True)

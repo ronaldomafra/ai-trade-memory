@@ -1,11 +1,14 @@
 import asyncio
 import json
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from textual.widgets import Button, DataTable, Input, Select, TextArea
+from textual.events import Paste
+from textual.widgets import Button, DataTable, Input, Select, Static, TextArea
 
+from poc.adapters.inbound import tui
 from poc.adapters.inbound.tui import LoginScreen, NewSessionScreen, TradeApp
 from poc.config import Config
 from poc.domain.primitives import DomainError
@@ -142,6 +145,160 @@ async def test_login_masks_and_clears_credentials_before_dashboard():
 
 
 @pytest.mark.asyncio
+async def test_totp_paste_normalizes_whitespace_replaces_old_code_and_preserves_login():
+    client = FixtureClient(authenticated=False)
+    app = TradeApp(client)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause(0.3)
+        screen = app.screen
+        otp = screen.query_one("#otp", Input)
+        otp.post_message(Paste("123456"))
+        await pilot.pause()
+        assert otp.disabled and otp.value == ""
+        screen.query_one("#username", Input).value = "owner"
+        screen.query_one("#password", Input).value = "synthetic-password"
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        otp = screen.query_one("#otp", Input)
+        assert not otp.disabled and otp.password
+        for text, expected in [
+            ("123456", "123456"),
+            ("123 456\r\n", "123456"),
+            ("\n 001\u00a0234 \n", "001234"),
+        ]:
+            otp.value = "12"
+            otp.post_message(Paste(text))
+            await pilot.pause()
+            assert otp.value == expected
+        for text in ("12345", "1234567", "abc123456", "123456\n654321", "１２３４５６"):
+            otp.post_message(Paste(text))
+            await pilot.pause()
+            assert otp.value == "001234"
+        app.copy_to_clipboard("123 456\r\n")
+        otp.focus()
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        assert otp.value == "123456"
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        assert client.access_token and not isinstance(app.screen, LoginScreen)
+        assert otp.value == "" and not client.commands
+
+
+@pytest.mark.asyncio
+async def test_totp_feedback_empty_submission_and_expired_login_do_not_call_server():
+    class CountingClient(FixtureClient):
+        second_factor_calls = 0
+
+        async def second_factor(self, challenge, code):
+            self.second_factor_calls += 1
+            await super().second_factor(challenge, code)
+
+    client = CountingClient(authenticated=False)
+    app = TradeApp(client)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause(0.3)
+        screen = app.screen
+        screen.query_one("#username", Input).value = "owner"
+        screen.query_one("#password", Input).value = "synthetic-password"
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        otp = screen.query_one("#otp", Input)
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        assert client.second_factor_calls == 0
+        assert "seis números" in str(screen.query_one("#login-error", Static).render())
+        otp.focus()
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        assert "Ctrl+Shift+V" in str(screen.query_one("#otp-status", Static).render())
+        otp.post_message(Paste("123 456"))
+        await pilot.pause()
+        assert "6/6" in str(screen.query_one("#otp-status", Static).render())
+        assert "123456" not in str(screen.query_one("#otp-status", Static).render())
+        screen.expire_login()
+        await pilot.pause()
+        assert screen.challenge is None and otp.disabled and otp.value == ""
+        assert not screen.query_one("#password", Input).disabled
+        assert not screen.query_one("#username", Input).disabled
+        assert str(screen.query_one("#login-submit", Button).label) == "Entrar"
+        assert "expirou" in str(screen.query_one("#login-error", Static).render())
+        assert client.second_factor_calls == 0 and not client.commands
+        # Re-entering the password creates a fresh challenge, without resetting the account.
+        screen.query_one("#password", Input).value = "synthetic-password"
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        otp.post_message(Paste("123456"))
+        await pilot.pause()
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        assert client.access_token and client.second_factor_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_local_paste_button_reads_only_on_request_and_keeps_invalid_code_out(monkeypatch):
+    copied = iter([DomainError("Copie somente o código de seis números."), "123456"])
+    reads = []
+
+    async def read_clipboard():
+        reads.append(True)
+        item = next(copied)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(tui, "read_totp_clipboard", read_clipboard)
+    client = FixtureClient(authenticated=False)
+    app = TradeApp(client)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause(0.3)
+        screen = app.screen
+        assert screen.query_one("#paste-otp", Button).disabled and not reads
+        screen.query_one("#username", Input).value = "owner"
+        screen.query_one("#password", Input).value = "synthetic-password"
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        assert not screen.query_one("#paste-otp", Button).disabled and not reads
+        await pilot.click("#paste-otp")
+        await pilot.pause(0.3)
+        assert len(reads) == 1 and screen.query_one("#otp", Input).value == ""
+        assert "seis números" in str(screen.query_one("#otp-status", Static).render())
+        await pilot.click("#paste-otp")
+        await pilot.pause(0.3)
+        assert len(reads) == 2 and screen.query_one("#otp", Input).value == "123456"
+        assert "6/6" in str(screen.query_one("#otp-status", Static).render())
+        await pilot.click("#login-submit")
+        await pilot.pause(0.3)
+        assert client.access_token and not client.commands
+
+
+@pytest.mark.asyncio
+async def test_server_challenge_deadline_automatically_reopens_password_step():
+    class ShortChallengeClient(FixtureClient):
+        async def login(self, username, password, read_only=False):
+            result = await super().login(username, password, read_only)
+            self.challenge_expires_at = datetime.now(UTC) + timedelta(seconds=0.1)
+            return result
+
+    client = ShortChallengeClient(authenticated=False)
+    app = TradeApp(client)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause(0.3)
+        screen = app.screen
+        screen.query_one("#username", Input).value = "owner"
+        screen.query_one("#password", Input).value = "synthetic-password"
+        await pilot.click("#login-submit")
+        await pilot.pause(0.4)
+        assert screen.challenge is None
+        assert screen.query_one("#password", Input).value == ""
+        assert not screen.query_one("#password", Input).disabled
+        assert screen.query_one("#otp", Input).disabled
+        assert screen.query_one("#paste-otp", Button).disabled
+        assert "expirou" in str(screen.query_one("#login-error", Static).render())
+        assert not client.access_token and not client.commands
+
+
+@pytest.mark.asyncio
 async def test_select_two_symbols_empty_dashboard_resize_readonly_and_quit():
     client = FixtureClient()
     client.scopes = frozenset({"read"})
@@ -151,6 +308,27 @@ async def test_select_two_symbols_empty_dashboard_resize_readonly_and_quit():
         app.query_one("#sessions", Select).value = "fixture-eth"
         await pilot.pause(0.3)
         assert app.snapshot["market"]["symbol"] == "ETHUSDT"
+        snapshot = deepcopy(app.snapshot)
+        snapshot["external_context"] = {
+            "news": {
+                "status": "unavailable",
+                "items": [],
+                "sources": {
+                    "api": {"status": "PARTIAL"},
+                    "rss": {"status": "COMPLETE"},
+                    "failed": {"status": "UNAVAILABLE"},
+                },
+            },
+            "prediction_markets": {
+                "status": "unavailable",
+                "items": [],
+                "discovery": {"status": "PARTIAL"},
+            },
+        }
+        app.render_snapshot(snapshot)
+        details = str(app.query_one("#ai-details", Static).render())
+        assert "JEV: 0 chamadas" in details and "2/3 fontes responderam" in details
+        assert "0 fatores utilizáveis" in details and "descoberta Polymarket: PARTIAL" in details
         assert app.query_one("#wallets", DataTable).row_count == 3
         assert app.query_one("#positions", DataTable).row_count == 0
         assert app.query_one("#new", Button).disabled

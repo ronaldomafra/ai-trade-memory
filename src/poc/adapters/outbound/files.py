@@ -152,10 +152,15 @@ class FileExporter:
                 dict(row)
                 for row in self.db.connection.execute(
                     "SELECT open_time_utc,close_time_exclusive_utc,open,high,low,close,volume "
-                    "FROM candles WHERE symbol=? AND interval='15m' "
+                    "FROM candles WHERE symbol=? AND interval=? "
                     "AND close_time_exclusive_utc<=? AND available_at<=? "
                     "ORDER BY open_time_utc DESC LIMIT 200",
-                    (record["symbol"], iso(datetime.now(UTC)), iso(datetime.now(UTC))),
+                    (
+                        record["symbol"],
+                        record["config"]["market"]["interval"],
+                        iso(datetime.now(UTC)),
+                        iso(datetime.now(UTC)),
+                    ),
                 )
             ]
             candles.reverse()
@@ -171,10 +176,30 @@ class FileExporter:
             calls = [
                 dict(row)
                 for row in self.db.connection.execute(
-                    "SELECT ai_call_id,call_purpose,actual_model,cost_usd,cost_source,status "
+                    "SELECT ai_call_id,call_purpose,actual_model,cost_usd,cost_source,"
+                    "status,started_at "
                     "FROM ai_calls"
                 )
             ]
+            daily_budget = None
+            ai_settings = record["config"]["ai"]
+            if ai_settings.get("budget_scope") == "SESSION":
+                day = datetime.now(UTC).date()
+                today = [r for r in calls if utc(r["started_at"]).date() == day]
+                daily_cost = sum(
+                    (decimal(r["cost_usd"]) for r in today if r["cost_usd"] is not None),
+                    Decimal(0),
+                )
+                daily_budget = {
+                    "scope": "SESSION",
+                    "day_utc": day.isoformat(),
+                    "max_calls_per_day": ai_settings["max_calls_per_day"],
+                    "cost_limit_enabled": ai_settings["cost_limit_enabled"],
+                    "max_observed_cost_usd_per_day": ai_settings["max_observed_cost_usd_per_day"],
+                    "physical_attempts": len(today),
+                    "observed_cost_usd": str(daily_cost),
+                    "unknown_cost_calls": sum(r["cost_usd"] is None for r in today),
+                }
             decisions = [
                 dict(row)
                 for row in self.db.connection.execute(
@@ -256,11 +281,22 @@ class FileExporter:
                 "equity_series": series,
                 "chart_candles": candles,
                 "chart_scope": {
-                    "interval": "15m",
+                    "interval": record["config"]["market"]["interval"],
                     "max_candles": 200,
                     "max_equity_points_per_portfolio": 500,
                 },
                 "recent_decisions": decisions,
+                "profile": {
+                    "profile_id": record["profile_id"],
+                    "version": record["profile_version"],
+                    "style": record["config"]
+                    .get("profile_definition", {})
+                    .get("profile", {})
+                    .get("style", "LEGACY"),
+                    "interval": record["config"]["market"]["interval"],
+                    "trend_interval": record["config"]["market"]["trend_interval"],
+                },
+                "opportunity_admission": self.db.runtime_state("profile_admission"),
                 "learning": {
                     "version": "memory_v1",
                     "outcomes": outcome_counts,
@@ -311,6 +347,7 @@ class FileExporter:
                     ),
                 },
                 "ai_cost": {
+                    "daily_budget": daily_budget,
                     "currency": "USD",
                     "scope": "physical_calls_for_this_session",
                     "total_api_cost_actual": str(

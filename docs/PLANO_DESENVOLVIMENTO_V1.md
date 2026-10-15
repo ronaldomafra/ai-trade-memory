@@ -2,6 +2,10 @@
 
 **Plano 1 · 12/10/2026 · SPEC 1.50 · D051/D052.**
 Documento para executar o desenvolvimento em ordem. Entregas em implementação; consultar o status para módulos disponíveis e pendências.
+**Extensão D056 / 14/10/2026:** depois da observação/correções do core atual,
+seguir [PLANO_PERFIS_ESTRATEGIA.md](PLANO_PERFIS_ESTRATEGIA.md) P00–P09 para
+cadastro/templates de swing, scalping e day trade. Hold adiado. Essa extensão
+substitui a exclusão histórica desses estilos, sem declarar que estão implementados.
 Ler [AGENTS.md](../AGENTS.md) e [SPEC.md](SPEC.md) integralmente antes de trabalhar.
 A SPEC determina comportamento; este plano organiza construção e comprovação.
 [Progresso](STATUS_DESENVOLVIMENTO.md) · [Escopo](ESCOPO_POC_V1.md) · [Decisões](DECISIONS.md).
@@ -10,7 +14,7 @@ A SPEC determina comportamento; este plano organiza construção e comprovação
 
 Aplicação Python hexagonal em Docker, paper trading 24/7, sessões independentes e TUI V1 local/remota. Cada sessão escolhe par Spot USDT, perfil implementado, ajustes permitidos e dataset opcional antes de iniciar. Restaurar recupera estado; fechar a TUI mantém o motor.
 
-A técnica, B JEV sem memória e C JEV com memória local e transferência validada entre moedas. Cada carteira começa com 100 USDT fictícios. Catálogo inicial `trend_15m_v1`; várias moedas/sessões não exigem inventar segundo estilo. HTML, negociação real e segundo estilo sem contrato ficam fora.
+A técnica, B JEV sem memória e C JEV com memória local e transferência validada entre moedas. Cada carteira começa com 100 USDT fictícios. Catálogo implementado inicial `trend_15m_v1`; extensão D056 planeja swing/scalping/day trade cadastráveis por templates completos e contratos próprios. HTML, negociação real e hold nesta etapa ficam fora.
 
 REST para login/2FA, configuração, criação/restauração, consultas e datasets; WebSocket para processamento observável, cotações, posições, decisões, saúde e eventos. O servidor controla containers; cliente remoto precisa apenas do endereço e credenciais, sem Docker ou SQLite.
 
@@ -31,7 +35,7 @@ Transferência automática publica observações amadurecidas, seleciona padrõe
 | E08 | Core remoto REST/auth/lifecycle | E06–E07 |
 | E09 | WebSocket/eventos/reconexão | E08 |
 | E10 | TUI V1 completa | E08–E09 |
-| E11 | Integração/24h/entrega | E00–E10 |
+| E11 | Integração/amostragem/entrega | E00–E10 |
 
 Marcos 1–5 permanecem consecutivos. Não antecipar interface em lugar de contabilidade, risco e recuperação.
 
@@ -207,12 +211,12 @@ Marcos 1–5 permanecem consecutivos. Não antecipar interface em lugar de conta
 - [ ] Compose integrado/control-api/motores/volumes/reverse proxy TLS, portas de motores privadas.
 - [ ] Percurso TUI→REST→motor→evento→WS→TUI: sessão, restore, dataset e transferência.
 - [ ] Duas sessões/pares, quotas globais, rede/SIGTERM/crash/token revogado e backup/restore.
-- [ ] Pelo menos 24h em paper com fontes disponíveis e logs/cobertura/custos registrados; senão aceite operacional pendente.
+- [ ] Analisar operação paper no período escolhido pelo usuário (D054), com fontes, logs, cobertura, custos, versões e lacunas registrados; sem mínimo de 24h ou reinício obrigatório da amostragem após atualização.
 - [x] Transferência funcional com fixtures identificadas; ativações reais apenas com dados válidos.
 - [x] README com instalação/.env/CLI/TUI/Docker/systemd/logs/diagnóstico/restore efetivamente testados.
 - [ ] Relatório final: versão/config, testes, chamadas reais vs mocks, artefatos e limitações.
 
-**Aceite:** SPEC 18 e todas as etapas completas, sem TODO/mock essencial em produção. Fonte/chave ausente ou 24h não realizado é pendência explícita. Homologação posterior do usuário; software pronto não comprova lucro.
+**Aceite:** SPEC 18 e todas as etapas completas, sem TODO/mock essencial em produção. Fonte/chave ausente é pendência explícita; D054 remove a duração mínima de 24h e deixa a janela de amostragem a critério do usuário. Registrar limitações das amostras disponíveis. Homologação posterior do usuário; software pronto não comprova lucro.
 
 **12/10/2026:** [revisão E05/E11](relatorios/VALIDACAO_E05_E11.md) registra 191 testes, instalação/smoke/Docker/retomada/backup/restore e dataset real BTC→ETH. Observação final 24h em curso; JEV/Marketaux/Gamma e hospedagem pública mantêm limitações explícitas. Não encerrar a etapa pelo início do ensaio.
 

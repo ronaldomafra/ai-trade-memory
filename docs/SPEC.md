@@ -1,7 +1,70 @@
 # POC — Motor de Paper Trading com JEV e Aprendizado Contínuo
 
 **Especificação técnica executável para agente de desenvolvimento (Python)**  
-**Versão:** 1.50 · **Data:** 2026-10-12 · **Idioma do projeto:** português (documentação), inglês (identificadores no código)
+**Versão:** 1.58 · **Data:** 2026-10-14 · **Idioma do projeto:** português (documentação/TUI), inglês (identificadores e instruções JEV)
+
+**Revisão 1.58 / D060:** após observar recusa `AI_DEADLINE_EXCEEDED` no
+scalping (2,3s de preparação, janela 8s e timeout IA 6s), usuário autorizou
+janela de 15s, atualização e partida do bot. Perfis SCALPING aceitam prazo
+ponta a ponta de até 15s; o timeout permanece subordinado ao prazo restante.
+Preservar decisões antigas, revisão publicada e snapshot da sessão anterior:
+publicar revisão 2 e iniciar nova sessão com os parâmetros anteriores, exceto
+o prazo 15s. Parar a anterior e deixar apenas o novo teste ZEC em execução.
+Intervalos 1m/5m, admissão local, proteção independente e gates de frescor/
+spread/desvio não mudam. Os 15s são hipótese operacional a medir, não prova
+de eficácia financeira ou garantia de resposta. Detalhes em 4.1.1 e D060.
+
+**Revisão 1.57 / D059:** usuário definiu orçamento de IA por perfil/bot, pois
+estratégias podem justificar custos diferentes. Nos perfis cadastráveis, limites
+de chamadas e custo são defaults editáveis do perfil, ajustáveis na criação e
+copiados para cada sessão. Contagem por sessão/dia UTC, sem teto global de 240
+ou US$ 0,05 interferindo entre novos bots; total geral apenas como relatório.
+Custos incluem classificação, decisão e retries físicos, sem duplicar reuso.
+Preservar snapshots/hashes e contrato de restauração dos bancos antigos.
+Escopo detalhado em 8.2.3; 8.2.1/8.2.2 permanecem referência do legado.
+
+**Revisão 1.56 / D058:** usuário autorizou colocar em inglês os objetivos e
+orientações dos perfis enviados ao JEV, após verificar a orientação oficial da
+TypeSafe sobre melhor precisão em inglês. Templates e defaults de novas
+configurações usam instruções versionadas `*_instructions_en_v2`; manter TUI e
+documentação em português, parâmetros operacionais e snapshots antigos intactos.
+Questionários de negociação/classificação já estão em inglês. Evidência externa
+conserva o idioma original; não introduzir tradução por chamada ou nova inferência.
+Não iniciar bots automaticamente para aplicar esta alteração.
+
+**Revisão 1.55 / D057:** usuário autorizou implementar o cadastro genérico de
+perfis e criação de bots pela TUI, parametrizando famílias suportadas, em vez de
+codificar um bot exclusivo por estilo. Parar a sessão atual para interromper
+custos; preservar histórico e aguardar escolha/criação do próximo bot com o usuário.
+Config/snapshot/protocolo V2 separados do legado, catálogo versionado, preview,
+REST/CLI/TUI e regras duras conforme P00–P09. Guia: `docs/GUIA_PERFIS_BOTS.md`.
+Defaults continuam experimentais; funcionamento operacional não comprova
+rentabilidade ou vantagem do JEV. Evidência de testes/implantação no status.
+
+**Revisão 1.54 / D056:** planejar perfis cadastráveis e pré-configurados de swing,
+scalping e day trade, com template completo e instruções JEV coerentes com regras
+do motor. Hold adiado. Executar a extensão depois da observação/correções do core
+atual, preservando `trend_15m_v1`. Plano P00–P09 e contratos propostos em
+`docs/PLANO_PERFIS_ESTRATEGIA.md`; pesquisa e YAMLs completos vinculados ali.
+Novos defaults são propostas para revisão/teste, não implementação ou calibração.
+
+**Revisão 1.53 / D055:** otimização autorizada do reaproveitamento de notícias:
+interpretação por conteúdo/ativo e comparação factual compartilhada por conjunto,
+com caches separados. Mudança de outras notícias não invalida toda a interpretação
+de um artigo inalterado; conflito é reavaliado sem reaproveitar ausência de conflito
+de outro conjunto. Implementação e testes isolados, ainda sem implantação.
+
+**Revisão 1.52 / D054:** período de amostragem definido pelo usuário, sem mínimo
+obrigatório de 24h ou reinício automático dessa contagem após atualizações.
+Análises usam o histórico disponível, identificando versões, intervalos e lacunas.
+Atualizações não dependem desse prazo; a implantação de D053 continua pendente,
+sem autorização implícita para reiniciar serviços nesta revisão documental.
+
+**Revisão 1.51 / D053:** limite financeiro de IA configurável e opcional,
+global entre sessões, default habilitado em US$ 0,05/dia UTC; guarda de chamadas
+continua ativa. Mudança autorizada somente no código/testes isolados durante o
+ensaio atual, sem aplicar configuração ou reiniciar serviços. Restrição temporal
+posteriormente substituída por D054; implantação ainda pendente. Ver seção 8.2.2.
 
 **Revisão 1.1:** decisão P001/D001 aprovada pelo usuário: contexto de notícias por API e Polymarket em B/C, comparação principal C−B e complementar B−A. Detalhes de integração e seleção das fontes permanecem em P010/P011. Registro em `docs/DECISIONS.md`.
 
@@ -109,7 +172,7 @@
 
 ## 0. Resumo executivo e decisões já tomadas
 
-**Desenho vigente (D050–D052).** `docs/ESCOPO_POC_V1.md` resume a entrega; `docs/BACKLOG_IMPLEMENTACAO.md` guarda implementação/validação. Notas de pendências técnicas abaixo não exigem novas microaprovações. Catálogo inicial trend_15m_v1; TUI terminal integrada após Marcos 1–5, HTML futuro. Documentação fechada não significa software pronto.
+**Desenho vigente (D050–D059).** `docs/ESCOPO_POC_V1.md` resume a entrega; `docs/BACKLOG_IMPLEMENTACAO.md` guarda implementação/validação. Notas de pendências técnicas abaixo não exigem novas microaprovações. Catálogo inicial trend_15m_v1 preservado; D057 autoriza cadastro genérico e templates de swing, scalping e day trade conforme `docs/PLANO_PERFIS_ESTRATEGIA.md` e `docs/GUIA_PERFIS_BOTS.md`. TUI terminal integrada após Marcos 1–5, HTML futuro. Documentação fechada não significa software pronto.
 
 
 Construir um **laboratório de negociação simulada de criptomoedas (paper trading)** que acompanha preços reais de mercado, calcula indicadores, coleta notícias, usa o modelo **JEV 1.13 via OpenRouter** para decisões probabilísticas e mantém um **Learning Engine próprio**, capaz de incorporar resultados históricos consolidados às próximas inferências. A POC não realiza transações reais, depósitos, saques, compra de créditos cripto nem operações em contas da corretora.
@@ -492,7 +555,7 @@ storage:
 
 Uma sessão nova exige seleção explícita de perfil por `--profile PROFILE_ID`, sem assumir um estilo pela duração do candle. O registro contém ID/versão, família de sinais, parâmetros, regras determinísticas A, política/perguntas B/C, dados/aquecimento, intervalos, duração/horário de operação, risco, custos e contrato de aprendizado. Resolver e validar a configuração completa antes de criar carteiras ou fazer inferência. Rejeitar perfil ausente, desconhecido, incompleto ou ainda sem implementação/testes; pesquisa não habilita execução.
 
-`trend_15m_v1` é o primeiro perfil aprovado em D011: operação contínua de curto prazo, 24/7, baseline A da seção 7.2, decisão 15m, tendência 1h, posição máxima 16 candles (~4h) e demais valores atuais como pré-configuração. Não acrescentar fechamento compulsório pela virada UTC; o dia UTC continua referência da trava diária de D004. Aprovação do perfil não significa implementação ou homologação concluída. D013 permite escolher/configurar os perfis na partida, sem fixar agora um segundo estilo. Contratos de novos perfis permanecem em P006; não implementá-los mudando apenas o YAML. Perfis futuros recebem contratos próprios, mantendo comparação A/B/C dentro de cada um.
+`trend_15m_v1` é o primeiro perfil aprovado em D011: operação contínua de curto prazo, 24/7, baseline A da seção 7.2, decisão 15m, tendência 1h, posição máxima 16 candles (~4h) e demais valores atuais como pré-configuração. Não acrescentar fechamento compulsório pela virada UTC; o dia UTC continua referência da trava diária de D004. Aprovação do perfil não significa implementação ou homologação concluída. D013 definiu escolha/configuração na partida; D056 posteriormente selecionou swing/scalping/day trade para o plano P00–P09, com contratos próprios e hold adiado. Não implementá-los mudando apenas o YAML; manter comparação A/B/C dentro de cada perfil.
 
 **Pré-configuração editável antes da sessão (D013):** cada perfil implementado possui template estruturado/versionado, com referência aos documentos da estratégia, valores iniciais, unidades, tipos, campos editáveis e validações de compatibilidade. Carregar o template do perfil escolhido e aplicar os ajustes explícitos do usuário antes da criação. A futura TUI deve permitir essa configuração antes de iniciar a sessão; o mesmo caso de uso/validação pertence à aplicação e serve à CLI. Não interpretar Markdown ou consultar JEV para descobrir parâmetros a cada partida; os documentos orientam templates mantidos e testados.
 
@@ -502,6 +565,53 @@ Persistir identidade/versão do template, referência documental, valores origin
 
 Salvar perfil/versão e configuração efetiva imutável na sessão e nas exportações/datasets. Não trocar perfil nem parâmetros no meio de uma sessão; para avaliar ajustes, abrir outra. Restauração carrega o perfil salvo e rejeita argumentos conflitantes. Memória preserva compatibilidade de perfil além de símbolo/família/horizonte, inclusive em importações D007.
 
+### 4.1.1 Perfis cadastráveis (plano D056, implementação autorizada D057)
+
+O usuário definiu em 14/10/2026: aproveitar a observação atual de trend_15m_v1 para
+analisar o core e corrigir falhas, depois implementar os estilos **swing, scalping
+e day trade**, deixando hold para uma etapa posterior. Um perfil deve ser criado
+a partir de template completo, com parâmetros e instruções próprias para o JEV;
+escolher um estilo não pode manter silenciosamente as regras de quatro horas do
+perfil antigo. A/B/C continuam variantes dentro de cada perfil/sessão.
+
+Contrato da extensão: `docs/PLANO_PERFIS_ESTRATEGIA.md` P00–P09, pesquisa em
+`docs/PESQUISA_PERFIS_ESTRATEGIA.md` e templates em `docs/templates/perfis/`.
+Numerais dos presets continuam defaults experimentais, sem ativação automática.
+D057 autoriza o cadastro e a execução parametrizada de famílias suportadas; publicar
+não inicia motor. Os valores das seções 4/7/10 existentes continuam sendo o contrato
+legado; a extensão usa Config/protocolo V2 e compatibilidade V1.
+
+D060: `parameters.app.max_candle_decision_lag_seconds` pode chegar a **15s**
+em SCALPING (anteriormente 8s). Trata-se do prazo após fechar o candle, não da
+cadência de decisões nem da idade máxima da cotação. Manter `ai.timeout_seconds`
+em 6s no novo teste ZEC e recusar execução fora do prazo; uma repetição só ocorre
+se houver tempo. Templates anteriores e sessões já criadas não são reescritos.
+
+- Manter arquitetura hexagonal, aplicação comum CLI/REST, TUI via REST/WSS,
+  SQLite de controle para versões e imagem Docker comum/motor por sessão.
+- Cadastro de dados parametriza famílias implementadas e testadas; não executa
+  código/expressões/imports enviados em YAML ou instruções livres.
+- Fixar na sessão a revisão completa, parâmetros/overrides, instruções, versões
+  de algoritmo/features/prompt/labels e hashes. Restore não consulta novo default
+  nem reescreve hash/IDs legados. Arquivar perfil não apaga sessões.
+- Generalizar intervalos, indicadores, agenda, proteção, contexto, maturação,
+  dataset, transferência e apresentação. Não basta alterar duas strings no YAML.
+- Day trade terá encerramento diário explícito; swing permite posição multidiária;
+  scalping de minutos exige admissão local e latência/custos compatíveis. Sem
+  cotação, fechamento fica pendente; risco não espera IA.
+- JEV recebe resumo estruturado e instruções do perfil efetivo, sem template bruto
+  completo no prompt. Regras duras continuam no código e valem para A/B/C.
+- Horizonte/intervalo/perfil/protocolo participam de memória e compatibilidade;
+  não transferir implicitamente labels entre estilos ou fabricar C ativa.
+- Até 240 chamadas físicas globais/dia e política de custo D053 preservados.
+  Cadastro de perfil não amplia limite. Registrar cobertura de oportunidades
+  admitidas, recusas e motivo de HOLD/expiração.
+- Homologar o perfil escolhido antes da sessão dedicada de aproximadamente um mês.
+  D054 mantém a janela de observação sob controle do usuário, sem bloqueio de 24h.
+
+Esta revisão autoriza e registra o **planejamento solicitado**, sem implementar,
+publicar presets, migrar bases, consumir inferências ou atualizar serviços.
+
 ### 4.2 Sessão com banco próprio e restauração (D010)
 
 Sessão é a unidade persistida de experimento, identificada pelo `run_id`; não é um dia UTC nem o horário de encerramento de day trade. Cada sessão tem um SQLite canônico e diretório próprio `data/sessions/RUN_ID/`. Os campos de storage acima são templates de caminhos: resolver `{run_id}` com identificador validado e persistir os caminhos efetivos. Criar sessão nova exige identidade/diretório novos, sem sobrescrever banco existente. Um registro de descoberta pode listar sessões, mas carteiras, ledger, memória, custos e eventos de cada uma permanecem no seu banco.
@@ -510,7 +620,7 @@ Restaurar abre o banco existente e recupera perfil/configuração, carteiras, po
 
 Após a homologação desejada pelo usuário, duas sessões de perfis implementados podem operar em paralelo, com relatórios por perfil e seus trios A/B/C. A cadência, features e horizontes pertencem à sessão; feed/fatores externos só podem ser reutilizados quando contexto e disponibilidade forem compatíveis, sem misturar memória estatística. Não juntar seus retornos como evidência única nem alterar parâmetros usando o período de avaliação atual.
 
-Os limites de IA continuam globais, inclusive com bancos separados: 240 chamadas físicas/dia e US$ 0,05 de custo observado/dia, sem multiplicação automática por sessão. Antes de habilitar a operação simultânea, implementar e testar reserva/coordenação do orçamento entre sessões, sem duplicar cobrança e sem ultrapassar limite por corrida entre processos. Distribuição/prioridade e desenho operacional são detalhes de P015. Dois perfis de 15m com B/C separados podem exigir nominalmente 384 chamadas de decisão/dia, além de classificação/repetições; esse cenário não cabe integralmente no limite atual. Não mudar cadência ou orçamento silenciosamente para acomodá-lo.
+Os limites de IA continuam globais, inclusive com bancos separados: até 240 chamadas físicas/dia e, por default, US$ 0,05 de custo observado/dia, sem multiplicação automática por sessão. D053/8.2.2 permite configurar/desabilitar explicitamente apenas o limite financeiro global. Antes de habilitar a operação simultânea, implementar e testar reserva/coordenação do orçamento entre sessões, sem duplicar cobrança e sem ultrapassar limite por corrida entre processos. Distribuição/prioridade e desenho operacional são detalhes de P015. Dois perfis de 15m com B/C separados podem exigir nominalmente 384 chamadas de decisão/dia, além de classificação/repetições; esse cenário não cabe integralmente no limite atual de chamadas. Não mudar cadência ou orçamento silenciosamente para acomodá-lo.
 
 Criar/restaurar são casos de uso da aplicação/CLI, também acionados por REST pela TUI D051/15.4. Adaptador Docker no servidor prepara sessão e inicia/retoma pelo run_id; cliente acompanha por REST/WSS. Integrar após Marcos 1–5 conforme plano E06–E11, sem frontend HTML.
 
@@ -906,6 +1016,51 @@ Reutilizar interpretação semântica já concluída enquanto conteúdo/evidênc
 - Processar/reusar D002 com tentativas, propósito/custo e orçamento global já definidos, sem chamadas por campo/candle, novo limite numérico ou aumento implícito de orçamento. Falta de orçamento, falha ou pendência não autorizam inferência fabricada; gerenciamento de risco continua.
 - Regra geral aprovada; contratos adicionais de validade por fator, detecção detalhada de mudanças/compatibilidade, critérios detalhados de correções/conflitos D044, diagnóstico/recuperação adicional de falhas D045 e política de contexto parcial/orçamento/entradas seguem P012. Não define por si só veto/peso ou permissão de novas posições. Implementar no Marco 5 após fechar esses contratos e validar referências/tempos; integração e eficácia pendentes.
 
+### 5.29.1 Reaproveitamento por notícia e comparação compartilhada (D055)
+
+- Interpretar relevância, relação com ativo, categoria, direção/intensidade,
+  confiança e evidência temporal usando somente o conteúdo da própria notícia.
+  Cache por evidência normalizada/hash do conteúdo coletado, ativo/par, perfil,
+  modelo solicitado e critérios/questionário `news_factors_v3`. Preservar modelo
+  efetivo e resposta bruta na auditoria. Coleta/ordem/entrada de outro artigo não
+  invalidam essa interpretação. Correção de conteúdo ou mudança incompatível de
+  destino/modelo/critérios produz nova versão, sem apagar a anterior.
+- Comparar conflitos factuais em uma única chamada estruturada para o conjunto
+  selecionado de duas a cinco notícias, com uma pergunta por item contra os demais.
+  Cache separado `news_conflicts_v1`, ordenação canônica por ID e evidências de
+  todas as notícias, inclusive as classificadas sem relevância ou ainda pendentes.
+  Mudança de conteúdo/composição invalida somente a comparação do conjunto.
+  Apenas reordenar não exige chamada nova. Uma notícia isolada não exige comparação;
+  se nenhuma interpretação for relevante/elegível, não gastar chamada para comparar.
+- Exemplo offline com cinco notícias: primeira avaliação demanda cinco
+  interpretações e uma comparação; trocar apenas uma demanda uma interpretação
+  nova e uma comparação, em vez das cinco reclassificações do desenho anterior.
+  O aquecimento inicial pode custar mais; economia real depende da renovação do
+  conjunto e do uso observado, sem promessa de redução fixa da fatura.
+- Não aceitar ausência de conflito calculada para um conjunto diferente. Falha,
+  resposta inválida, orçamento indisponível ou comparação pendente deixam conflito
+  `UNDETERMINED`, diagnóstico e cobertura parcial. Interpretações válidas permanecem
+  disponíveis; compra apoiada somente em premissa com conflito não verificável é
+  bloqueada pelos gates existentes. Fundamento técnico independente continua
+  sujeito às mesmas verificações D046/D047, sem mudança de risco/thresholds.
+- As duas etapas usam o mesmo propósito `context_classification`, orçamento
+  global, retries e circuito já contratados. Resultado concluído é reutilizado
+  persistentemente; processamento falho pode ser tentado em nova janela da coleta
+  `news.poll_minutes` (10m no default), com reserva compartilhada por janela e sem
+  repetir envio a cada leitura/renderização. Limite de tentativas físicas por
+  requisição lógica continua duas; cada nova tentativa é contabilizada.
+- Persistir vínculos de interpretação/comparação, conjunto avaliado e disponibilidade
+  de cada etapa. Disponibilidade do fator composto é a mais recente das etapas;
+  nenhuma versão futura participa de cutoff anterior, inclusive após restart.
+  Evidências curtas usam até 600 caracteres do resumo já coletado, sem artigo
+  integral. Datas de publicação/primeira observação e validade não são renovadas.
+- Recibos/IDs adicionais de etapas ficam no cache e snapshots de auditoria; o
+  prompt de negociação conserva fator, evidência, conflito/status e disponibilidade
+  efetiva, sem repetir esses recibos. Mesmo contexto B/C e contagem física única.
+  Novo contrato de notícias exige aquecimento; resultados legados permanecem no
+  histórico, sem supor equivalência com a interpretação sem pares. Questionário
+  e cache semântico Polymarket `external_factors_v2` permanecem compatíveis.
+
 ### 5.30 Informações conflitantes e correções (D044)
 
 Preservar relatos/evidências com fontes/origens, datas, conteúdo/versões e vínculos ao acontecimento. Registrar divergência identificável sobre o mesmo fato e período, distinguindo conflito factual, expectativa e correção.
@@ -1190,15 +1345,83 @@ Cada tentativa possui uma linha própria em `ai_calls`, inclusive falhas ou resp
 - Controlar `max_calls_per_day` e `max_observed_cost_usd_per_day` em UTC. Se limite atingir, não realizar novas chamadas; produzir HOLD seguro e log `AI_BUDGET_EXCEEDED`.
 - Cota de crédito/permissões de chave devem ser verificáveis via endpoint de chave do OpenRouter, caso implementado, sem expor a chave em logs.
 
-### 8.2.1 Coordenação mínima entre sessões (D050)
+### 8.2.1 Coordenação mínima entre sessões (D050/D053)
 
 SQLite operacional local compartilhado para orçamento IA; finanças/memória permanecem por sessão. Identidade de tentativa por sessão, propósito, pedido lógico e índice D005, com unicidade.
 
 - Reservar/registrar tentativa antes do envio em transação curta atômica, revalidando dia UTC, chamadas/custo observado. Corrida entre motores não consome a mesma capacidade; indisponibilidade impede envio.
 - Conciliar estado/resposta/custo uma vez; bancos locais referenciam identidade global. Não presumir commit atômico entre bancos ou reenviar após crash sem resolução da tentativa.
 - Tentativa indeterminada permanece contabilizada; custo ausente NULL/unknown, sem liberar como gratuita ou reiniciar contador no restart.
-- Sem subcotas fixas na V1: capacidade global disponível e recusas/cobertura por sessão/carteira/propósito. Manter 240 chamadas físicas e US$ 0,05 observado/dia, inclusive classificação/retries. Demanda de dois perfis 15m pode atingir 384 antes de extras; falta de capacidade produz HOLD B/C e mantém risco/A, sem alterar cadência/limite.
+- Sem subcotas fixas na V1: capacidade global disponível e recusas/cobertura por sessão/carteira/propósito. Manter até 240 chamadas físicas/dia; o limite financeiro tem default habilitado em US$ 0,05 observado/dia e é configurável/desabilitável globalmente conforme D053/8.2.2. Ambos incluem classificação/retries. Demanda de dois perfis 15m pode atingir 384 antes de extras; falta de capacidade produz HOLD B/C e mantém risco/A, sem alterar cadência/limite implicitamente.
 - Validar contenção, rollover, crash antes/depois do envio e conciliação antes do paralelo. Não garantir teto absoluto de fatura com custo desconhecido. Escolha técnica de consolidação; subcotas/redistribuição avançadas são evolução.
+
+### 8.2.2 Limite financeiro global configurável (D053)
+
+Solicitação do usuário em 14/10/2026: permitir habilitar/desabilitar o limite de
+custo e escolher seu valor. A alteração de core foi inicialmente autorizada apenas
+no código. D054 remove a espera obrigatória pelo ensaio de 24h; implantação e
+configuração reais continuam pendentes de solicitação, sem reinício nesta revisão.
+
+- Política operacional única para todas as sessões no banco de orçamento;
+  `cost_limit_enabled` booleano estrito e `max_observed_cost_usd_per_day` Decimal
+  positivo finito, sem teto fixo de US$ 0,05 para uma política explicitamente definida.
+  Default continua habilitado em US$ 0,05; desabilitar conserva o valor para reativação.
+- Alteração explícita por proprietário global autenticado/2FA/escopo manage ou
+  CLI local do servidor; registrar revisão, ator e horário. PUT exige ambos os
+  campos, para não redefinir valor omitido. Política idêntica repetida é idempotente.
+- Cada reserva consulta a política global na mesma transação; registrar a revisão
+  e limites efetivos da tentativa. A política explícita prevalece sobre o valor
+  legado no snapshot/configuração de cada sessão. Não acrescentar a configuração
+  global ao hash financeiro/estratégico imutável da sessão.
+- Sem política explícita, preservar comportamento legado do menor teto diário
+  compartilhado; `ai.max_observed_cost_usd_per_day` passa a ser default/fallback,
+  não campo remoto editável de um perfil para substituir a política global.
+- Alterar valor/habilitação nunca zera despesas, tentativas, custos desconhecidos
+  ou auditoria. Desabilitar mantém todo registro de cobrança; reativar abaixo do
+  gasto já observado bloqueia novas chamadas imediatamente. Rollover segue UTC.
+- A trava de chamadas (até 240), circuito de credencial, prazos/retries e bloqueio
+  de recuperação operacional incerta continuam independentes e ativos.
+- Expor status/uso diário e configuração via CLI/API. Atualização e configuração
+  reais exigem todos os serviços compatíveis, sem espera obrigatória de 24h;
+  não presumir que motores antigos leiam a nova política. Nenhuma opção é ativada
+  automaticamente no experimento atual por editar o código.
+- O teto é sobre custo observado antes de novos envios; não é garantia absoluta
+  de fatura diante de chamadas em voo ou custos desconhecidos.
+
+### 8.2.3 Orçamento por perfil e sessão/bot (D059)
+
+- `parameters.ai.budget_scope: SESSION` identifica o novo contrato.
+  `max_calls_per_day` é inteiro positivo editável; `cost_limit_enabled` é
+  booleano e `max_observed_cost_usd_per_day` é Decimal positivo finito em USD.
+  Defaults permanecem 240/US$ 0,05/habilitado, agora por bot, sem teto global
+  oculto. Desativar custo não desativa o limite de chamadas.
+- O perfil fornece os padrões. Cada sessão recebe cópia e ajustes imutáveis;
+  duas sessões do mesmo perfil têm contadores independentes. Alterar revisão
+  do perfil não muda bots em execução. Novas sessões de perfis cadastráveis
+  antigos recebem explicitamente o contrato SESSION, sem reescrever o catálogo.
+- Armazenamento operacional pode continuar compartilhado, com reservas
+  transacionais identificadas por run_id, hash da política e recibo por chamada.
+  Idempotência, crash, custo desconhecido, contagem antes do envio, renovação UTC
+  e reconciliação da projeção local continuam obrigatórios.
+- Limites abrangem chamadas físicas de trade, classificação e retries do bot
+  que iniciou a requisição. Cache e compartilhamento B/C não criam outra despesa.
+  Classificação bem-sucedida segue compartilhável; recusa por orçamento de um
+  pagador não deve indisponibilizar a evidência para outro bot com saldo de cota.
+- `GET /v1/ai-budget` é relatório agregado, sem política que limite novos bots;
+  GET `/v1/sessions/{run_id}/ai-budget` exige leitura da sessão. PUT global
+  responde 409 e orienta configuração no perfil/criação. CLI `ai-budget --run-id`
+  consulta o bot; configuração nova ocorre nos parâmetros antes da partida.
+- Legacy Config/perfis sem marcador mantêm serialização e regras anteriores na
+  retomada. Política antiga só pode ser ajustada explicitamente por
+  `/v1/legacy-ai-budget` ou `ai-budget --legacy-global`; não governa SESSION.
+  Não reativar envio por simples downgrade do escopo. Bloqueio por recuperação
+  incerta e circuito de credencial/provedor permanecem proteções independentes.
+- TUI mostra orçamento diário da sessão e custo observado acumulado. IA é gasto
+  real em USD, separado dos resultados paper em USDT; não prometer que o lucro
+  cobrirá esse custo, nem descontar a mesma chamada em B e C automaticamente.
+  Teto de custo observado não garante teto absoluto de fatura se houver
+  chamadas em voo ou cobrança desconhecida. Marketaux gratuito mantém a cota
+  real de conta do provedor, independente da política JEV do bot.
 
 ### 8.3 Tratamento de falhas
 
@@ -1843,7 +2066,7 @@ Escolhas iniciais FastAPI/Uvicorn/Textual. Mesmo host/volumes locais; hospedagem
 
 **Qualidade D020:** verificar mercado fechado, resultado/preço incompatíveis, bid/ask inválidos, dado vencido e qualidade insuficiente/não verificável, com exclusão do sinal quantitativo e motivo persistido. Não fabricar neutralidade/50%, profundidade a partir de liquidez agregada ou atividade recente pelo `updatedAt`. Preservar notícias válidas, mesmo conjunto elegível B/C e ausência de dados futuros. Completar limiares e testes de fronteira em P011; mocks não validam a rota pública nem os limiares reais.
 
-**Mercado híbrido D021:** testar mensagens WebSocket abertas/fechadas, bid/ask inválido ou vencido, dado atrasado/duplicado e ausência de timestamp de evento sem fabricação. Testar ping/pong, interrupção/renovação/reconexão e REST para aquecimento, recuperação de candles e alternativa de cotações; cotação recente não é sobrescrita por resposta atrasada. Duplicata entre fontes/restart não duplica ciclo, chamada JEV, fill ou ledger. Conexão saudável sem preço atual não libera entrada; sem ambas as fontes, preservar falha segura e risco pendente. Backfill não inventa bids históricos, negocia retroativamente ou muda D006. Verificar adaptadores somente de mercado, sem carregar chave. Fixtures não comprovam estabilidade de conexão real; operação 24h continua sujeita ao aceite operacional.
+**Mercado híbrido D021:** testar mensagens WebSocket abertas/fechadas, bid/ask inválido ou vencido, dado atrasado/duplicado e ausência de timestamp de evento sem fabricação. Testar ping/pong, interrupção/renovação/reconexão e REST para aquecimento, recuperação de candles e alternativa de cotações; cotação recente não é sobrescrita por resposta atrasada. Duplicata entre fontes/restart não duplica ciclo, chamada JEV, fill ou ledger. Conexão saudável sem preço atual não libera entrada; sem ambas as fontes, preservar falha segura e risco pendente. Backfill não inventa bids históricos, negocia retroativamente ou muda D006. Verificar adaptadores somente de mercado, sem carregar chave. Fixtures não comprovam estabilidade de conexão real; avaliar evidências operacionais no período escolhido pelo usuário, sem mínimo de 24h (D054).
 
 **Cadência Polymarket D022:** com relógio controlado, testar agendas 5m/60m e descoberta inicial, parâmetros persistidos/restaurados e snapshot elegível exatamente até 10m, vencido acima do limite. Cache relido, erro de coleta e atualização de metadados não rejuvenescem preço/livro; coleta/classificação posterior não altera decisão passada. Não multiplicar consulta por B/C, mudar cadência JEV/Binance ou inferir qualidade pelo teto de cache. Contabilizar consultas físicas adicionais conforme contrato de dimensionamento a completar em P011/P015; testes offline não validam acesso real.
 
@@ -1874,7 +2097,11 @@ Escolhas iniciais FastAPI/Uvicorn/Textual. Mesmo host/volumes locais; hospedagem
 
 ### Aceite para rodar desassistido
 
-- Processo opera pelo menos **24 horas em teste** com simulação e reinicialização intencional, sem inconsistência.
+- Avaliar operação paper, retomada e consistência com as amostras disponíveis,
+  durante período escolhido pelo usuário (D054), sem duração mínima obrigatória.
+  Registrar início/fim, versões, reinícios, lacunas e cobertura efetiva. Atualizar
+  não apaga os resultados anteriores nem exige reiniciar contagem de 24h; separar
+  resultados por versão quando uma mudança puder afetar sua comparação.
 - Três carteiras começam com 100 USDT e preservam isolamento.
 - Um candle fechado gera, no máximo, **uma decisão por carteira**.
 - Todos os fills têm preço observado posterior à decisão, taxas e quantidade válidas.
@@ -1927,7 +2154,7 @@ Escolhas iniciais FastAPI/Uvicorn/Textual. Mesmo host/volumes locais; hospedagem
 
 ---
 
-**Extensões D051/D052:** testar BTC→ETH com origem/normalização, exclusão temporal, mínimos locais intactos, sombra anterior ao outcome, Brier/baseline/overlap, ACTIVE/SUSPENDED/insuficiência/catálogo offline/dedupe/restore. REST/WSS remoto: senha/2FA/escopo, token expirado/revogado durante conexão, lifecycle server-side idempotente, upload, snapshot-watermark/replay/resync/backpressure e TUI sem Docker/SQLite. Aceite com duas sessões/24h e evidências no status.
+**Extensões D051/D052:** testar BTC→ETH com origem/normalização, exclusão temporal, mínimos locais intactos, sombra anterior ao outcome, Brier/baseline/overlap, ACTIVE/SUSPENDED/insuficiência/catálogo offline/dedupe/restore. REST/WSS remoto: senha/2FA/escopo, token expirado/revogado durante conexão, lifecycle server-side idempotente, upload, snapshot-watermark/replay/resync/backpressure e TUI sem Docker/SQLite. Aceite com duas sessões e evidências no status; duração observacional escolhida pelo usuário conforme D054.
 
 ---
 
@@ -1987,7 +2214,7 @@ Executar Marcos 1–5 na ordem, depois runtime, transferência, REST/auth, WebSo
 - E08: controle REST remoto, auth/2FA e lifecycle server-side.
 - E09: WS autorizado, snapshot/cursores/reconexão.
 - E10: TUI V1 completa local/remota, sem novo broker/banco financeiro.
-- E11: integração, duas sessões, testes/24h/restore e entrega.
+- E11: integração, duas sessões, testes/amostragem definida pelo usuário/restore e entrega.
 
 Seguir `docs/PLANO_DESENVOLVIMENTO_V1.md`. Todas as extensões fazem parte da entrega; acesso/credenciais/aceite ausentes são pendências explícitas. Não forçar ACTIVE real sem dados válidos.
 

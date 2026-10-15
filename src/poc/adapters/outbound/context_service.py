@@ -14,14 +14,17 @@ from poc.domain.event_time import temporal_relation
 from poc.domain.external import context_at, relevant_candidates
 from poc.domain.prediction import metadata_quality, probability_changes, quality, select_markets
 from poc.domain.primitives import iso, stable_id, utc
+from poc.domain.profiles import parameters, window_seconds
+from poc.domain.profiles import seconds as interval_seconds
 
 
 def semantic_news(item: dict) -> dict:
     return {
         "item_id": item["item_id"],
+        "content_hash": item["content_hash"],
         "source_kind": "NEWS",
         "title": item["title"],
-        "excerpt": item["summary"][:360],
+        "excerpt": item["summary"][:600],
         "url": item["url"],
         "source": item["source"],
         "published_at": item["published_at"],
@@ -48,6 +51,21 @@ def compact_factor(
     )
     return {
         **{key: result[key] for key in fields},
+        **{
+            key: result[key]
+            for key in (
+                "semantic_classification_id",
+                "semantic_available_at",
+                "conflict_status",
+                "conflict_reason",
+                "conflict_criteria_version",
+                "conflict_classification_id",
+                "conflict_ai_call_id",
+                "conflict_available_at",
+                "peer_evidence_ids",
+            )
+            if key in result
+        },
         "event_time": result.get("event_time"),
         "profile_window_seconds": window_seconds,
         "eligible": True,
@@ -151,9 +169,8 @@ class ContextService:
         pending = 0
         classification_failures = []
         classified_not_relevant = 0
-        for item, semantic in zip(selected, evidence, strict=True):
-            peers = [peer for peer in evidence if peer["item_id"] != semantic["item_id"]]
-            result = await self.classifier.classify(semantic, peers, self.base)
+        classified = await self.classifier.classify_news(evidence, self.base)
+        for item, result in zip(selected, classified, strict=True):
             if result["status"] != "READY" or result.get("relevance") == "UNDETERMINED":
                 pending += 1
                 classification_failures.append(
@@ -168,11 +185,25 @@ class ContextService:
             if result["relevance"] == "NOT_RELEVANT":
                 classified_not_relevant += 1
                 continue
+            if result.get("conflict_status", "READY") != "READY":
+                pending += 1
+                classification_failures.append(
+                    {
+                        "item_id": item["item_id"],
+                        "status": result["conflict_status"],
+                        "reason": result.get("conflict_reason") or "NEWS_CONFLICT_UNAVAILABLE",
+                        "ai_call_id": result.get("conflict_ai_call_id"),
+                        "stage": "NEWS_CONFLICT_COMPARISON",
+                    }
+                )
             expires = utc(item["published_at"]) + timedelta(hours=self.config.news.lookback_hours)
             if utc(expires) >= utc(self.clock.now()):
                 factors.append(
                     compact_factor(
-                        result, item, expires, self.config.strategy.max_holding_candles * 900
+                        result,
+                        item,
+                        expires,
+                        self.config.strategy.max_holding_candles * interval_seconds(self.config),
                     )
                 )
         sources = {
@@ -221,6 +252,9 @@ class ContextService:
         to_evaluate = self.selected
         if review_selection:
             discovery = await self.poly.discover(self.base)
+            # A completed public read is available after its response, not at the
+            # earlier start of discovery. Preserve each record's observed_at.
+            candidate_cutoff = self.clock.now()
             self.source_states["poly-discovery"] = discovery
             self.markets = discovery["markets"]
             # Only publicly stated asset/macro themes are classification candidates.
@@ -233,7 +267,7 @@ class ContextService:
                     "first_seen_at": market["observed_at"],
                     "published_at": market["observed_at"],
                 }
-                if relevant_candidates([pseudo], self.base, now):
+                if relevant_candidates([pseudo], self.base, candidate_cutoff):
                     candidates.append(market)
             # Candidate observations do not consume tracked slots. Apply all mandatory
             # filters and semantic priority before the final market/occurrence caps.
@@ -296,7 +330,7 @@ class ContextService:
                         {
                             **result,
                             "profile_window_seconds": self.config.strategy.max_holding_candles
-                            * 900,
+                            * interval_seconds(self.config),
                         },
                         self.clock.now(),
                     ),
@@ -367,13 +401,20 @@ class ContextService:
             expires = min(
                 utc(book["observed_at"])
                 + timedelta(minutes=self.config.polymarket.snapshot_max_age_minutes),
+                utc(book["source_at"])
+                + timedelta(minutes=self.config.polymarket.snapshot_max_age_minutes),
+                utc(candidate["trade"]["source_at"])
+                + timedelta(minutes=self.config.polymarket.max_trade_age_minutes),
                 utc(market["liquidity_observed_at"])
                 + timedelta(minutes=self.config.polymarket.liquidity_max_age_minutes),
                 utc(market["volume_observed_at"])
                 + timedelta(minutes=self.config.polymarket.volume_24h_max_age_minutes),
             )
             factor = compact_factor(
-                result, news_like, expires, self.config.strategy.max_holding_candles * 900
+                result,
+                news_like,
+                expires,
+                self.config.strategy.max_holding_candles * interval_seconds(self.config),
             )
             factor.update(
                 {
@@ -425,7 +466,21 @@ class ContextService:
         }
 
     def snapshot(self, cutoff: datetime) -> dict:
-        return context_at(self.store.external_context(cutoff), cutoff)
+        context = self.store.external_context(cutoff)
+        if context and parameters(self.config):
+            # Persisted context also carries scalar metadata (criteria_version).
+            # Apply the profile window only to evidence sections, preserving metadata.
+            context = {**context}
+            for section in ("news", "prediction_markets"):
+                values = context[section]
+                context[section] = {
+                    **values,
+                    "items": [
+                        {**item, "profile_window_seconds": window_seconds(self.config, cutoff)}
+                        for item in values.get("items", [])
+                    ],
+                }
+        return context_at(context, cutoff)
 
     async def run(self, stop: asyncio.Event, startup: asyncio.Event) -> None:
         await startup.wait()

@@ -8,7 +8,14 @@ from typing import Protocol
 from poc.domain.models import DailyRiskState, Quote, Wallet
 from poc.domain.primitives import next_utc_day, utc
 
-EXIT_PRECEDENCE = ("STOP_LOSS", "DAILY_RISK_GUARD", "TAKE_PROFIT", "MAX_HOLDING", "STRATEGY_SELL")
+EXIT_PRECEDENCE = (
+    "STOP_LOSS",
+    "DAILY_RISK_GUARD",
+    "TAKE_PROFIT",
+    "MAX_HOLDING",
+    "SESSION_WINDOW_CLOSED",
+    "STRATEGY_SELL",
+)
 
 
 class RiskParameters(Protocol):

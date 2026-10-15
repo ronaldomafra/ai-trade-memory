@@ -26,6 +26,8 @@ class ControlStore:
           CREATE TABLE IF NOT EXISTS datasets(
             dataset_id TEXT PRIMARY KEY,file_hash TEXT NOT NULL,path TEXT NOT NULL,
             metadata_json TEXT NOT NULL,created_at TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS command_resolutions(
+            command_id TEXT PRIMARY KEY REFERENCES commands(command_id),value_json TEXT NOT NULL);
         """)
 
     def close(self):
@@ -85,6 +87,19 @@ class ControlStore:
                 record["created_at"],
             ),
         )
+
+    def command_resolution(self, command_id: str) -> dict | None:
+        row = self.connection.execute(
+            "SELECT value_json FROM command_resolutions WHERE command_id=?", (command_id,)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def pin_resolution(self, command_id: str, value: dict) -> dict:
+        self.connection.execute(
+            "INSERT OR IGNORE INTO command_resolutions VALUES(?,?)",
+            (command_id, canonical_json(value)),
+        )
+        return self.command_resolution(command_id)
 
     def register_dataset(
         self, identity: str, file_hash: str, path: Path, metadata: dict, now: datetime

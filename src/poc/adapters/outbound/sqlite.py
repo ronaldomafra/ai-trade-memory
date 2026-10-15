@@ -71,11 +71,11 @@ class SessionDatabase:
         self.connection.execute("PRAGMA busy_timeout=10000")
         self.connection.execute("PRAGMA synchronous=FULL")
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3, 4, 5, 6) or (version == 0 and not create):
+        if version not in (0, 1, 2, 3, 4, 5, 6, 7) or (version == 0 and not create):
             self.connection.close()
             raise DomainError("Unknown or incompatible session schema")
         if readonly:
-            if version != 6:
+            if version not in (6, 7):
                 self.connection.close()
                 raise DomainError("Session schema must be migrated locally before remote reads")
             self.connection.execute("PRAGMA query_only=ON")
@@ -84,6 +84,9 @@ class SessionDatabase:
             number = int(migration.name.split("_")[0])
             if number > version:
                 self.connection.executescript(migration.read_text())
+        if self.connection.execute("PRAGMA foreign_key_check").fetchone():
+            self.connection.close()
+            raise DomainError("Foreign-key integrity check failed after migration")
 
     def close(self) -> None:
         self.connection.close()
@@ -296,8 +299,9 @@ class SessionDatabase:
     def save_pending_outcome(self, record: dict) -> None:
         self._require_transaction()
         self.connection.execute(
-            "INSERT OR IGNORE INTO decision_outcomes(outcome_id,decision_id,horizon_bars,"
-            "label_kind,maturity_time,status,reference_json) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO decision_outcomes(outcome_id,decision_id,horizon_bars,"
+            "label_kind,maturity_time,status,reference_json) VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(outcome_id) DO NOTHING",
             (
                 record["outcome_id"],
                 record["decision_id"],
@@ -319,14 +323,14 @@ class SessionDatabase:
         return [{**dict(row), "reference": json.loads(row["reference_json"])} for row in rows]
 
     def first_maturity_quote(
-        self, symbol: str, maturity: datetime, cutoff: datetime
+        self, symbol: str, maturity: datetime, cutoff: datetime, window_seconds: int = 90
     ) -> Quote | None:
         from datetime import timedelta
 
         rows = self.connection.execute(
             "SELECT quote_id FROM price_quotes WHERE symbol=? AND observed_at>=? "
             "AND observed_at<=? AND received_at<=? ORDER BY observed_at,received_at,quote_id",
-            (symbol, iso(maturity), iso(maturity + timedelta(seconds=90)), iso(cutoff)),
+            (symbol, iso(maturity), iso(maturity + timedelta(seconds=window_seconds)), iso(cutoff)),
         ).fetchall()
         for row in rows:
             quote = self.quote(row[0])
@@ -925,11 +929,30 @@ class SessionDatabase:
         ).fetchone()
         if row:
             same = all(
-                decimal(row[n]) == getattr(candle, n)
-                for n in ("open", "high", "low", "close", "volume")
+                decimal(row[n]) == getattr(candle, n) for n in ("open", "high", "low", "close")
             )
             if not same or row["close_time_exclusive_utc"] != iso(candle.close_time_exclusive):
                 raise DomainError("Conflicting finalized candle")
+            if decimal(row["volume"]) != candle.volume:
+                # Preserve the first observed volume and its original availability cutoff.
+                previous = format(decimal(row["volume"]).normalize(), "f")
+                observed = format(candle.volume.normalize(), "f")
+                self.event(
+                    "CANDLE_VOLUME_REVISION_IGNORED",
+                    {
+                        "symbol": candle.symbol,
+                        "interval": candle.interval,
+                        "open_time": iso(candle.open_time),
+                        "stored_volume": previous,
+                        "observed_volume": observed,
+                        "stored_source": row["source"],
+                        "observed_source": candle.source,
+                        "stored_available_at": row["available_at"],
+                        "policy": "KEEP_FIRST_FINALIZED_OBSERVATION",
+                    },
+                    candle.available_at,
+                    stable_id("candle-volume-revision", key, previous, observed, candle.source),
+                )
             return False
         self.connection.execute(
             "INSERT INTO candles VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -942,6 +965,14 @@ class SessionDatabase:
             ),
         )
         return True
+
+    def last_exit_at(self, portfolio_id: str):
+        row = self.connection.execute(
+            "SELECT filled_at FROM paper_fills WHERE portfolio_id=? AND side='SELL' "
+            "ORDER BY filled_at DESC LIMIT 1",
+            (portfolio_id,),
+        ).fetchone()
+        return utc(row[0]) if row else None
 
     def candles(self, symbol: str, interval: str, limit: int = 1000) -> list[Candle]:
         rows = self.connection.execute(

@@ -149,3 +149,102 @@ def test_exact_proposition_association_keeps_full_rules_and_groups_duplicate_eve
     assert mismatched["association_status"] == "PENDING"
     assert mismatched["association_evidence"]["rules"] == long_rules
     assert mismatched["content_hash"] != original["content_hash"]
+
+
+def test_shared_complete_rules_asset_and_period_group_thresholds_without_id_only_association():
+    raw = raw_market()
+    rules = "Resolve from Ethereum ETH/USDT close on the date and threshold specified in the title."
+    raw.update(
+        question="Will Ethereum be above $2400 on October 14?",
+        description=rules,
+        endDate="2026-10-14T16:00:00Z",
+    )
+    raw["events"] = [
+        {
+            "id": "event-1",
+            "title": "Ethereum above ___ on October 14?",
+            "description": rules,
+            "endDate": raw["endDate"],
+        }
+    ]
+    first = normalize_market(raw, NOW, "REPORTED_USD_V1")
+    assert first["association_status"] == "VERIFIED_SHARED_RULES_OBJECT_PERIOD"
+    raw["question"] = "Will Ethereum be above $2500 on October 14?"
+    assert normalize_market(raw, NOW)["occurrence_id"] == first["occurrence_id"]
+    raw["endDate"] = "2026-10-15T16:00:00Z"
+    assert normalize_market(raw, NOW)["association_status"] == "PENDING"
+    raw["endDate"] = raw["events"][0]["endDate"]
+    raw["events"][0]["description"] = rules + " Use another exchange."
+    assert normalize_market(raw, NOW)["association_status"] == "PENDING"
+
+
+def test_verified_gamma_dollar_contract_uses_numeric_totals_not_undocumented_clob_aliases():
+    raw = raw_market()
+    raw.update(
+        version="v1",
+        liquidityNum="15000",
+        volume24hr="2500",
+        liquidityClob="999999999",
+        volume24hrClob="999999999",
+    )
+    result = normalize_market(raw, NOW, "GAMMA_NUM_DOLLAR_FIELDS_V1")
+    assert result["metric_unit_contract"] == "REPORTED_USD_V1"
+    assert result["liquidity_reported"] == "15000" and result["volume_24h_reported"] == "2500"
+    assert result["metric_fields"] == {"liquidity": "liquidityNum", "volume_24h": "volume24hr"}
+    raw.pop("liquidityNum")
+    assert (
+        normalize_market(raw, NOW, "GAMMA_NUM_DOLLAR_FIELDS_V1")["metric_unit_contract"]
+        == "UNVERIFIED"
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Will Ethereum be above $2500 on October 15?",
+        "Will Ethereum be above $2500 on October 14, 2027?",
+        "Will Ethereum be above $2500 on October 14 at 6PM ET?",
+        "Will Bitcoin be above $2500 on October 14?",
+    ],
+)
+def test_threshold_group_rejects_different_objects_and_complete_periods(question):
+    raw = raw_market()
+    rules = "Resolve from Ethereum ETH/USDT close on the date and threshold specified in the title."
+    raw.update(question=question, description=rules, endDate="2026-10-14T16:00:00Z")
+    raw["events"] = [
+        {
+            "id": "e-1",
+            "title": "Ethereum above ___ on October 14?",
+            "description": rules,
+            "endDate": raw["endDate"],
+        }
+    ]
+    assert normalize_market(raw, NOW)["association_status"] == "PENDING"
+
+
+def test_other_asset_named_alias_can_verify_threshold_contract():
+    raw = raw_market()
+    rules = "Resolve from DOGE/USDT close on the date and threshold specified in the title."
+    raw.update(
+        question="Will Dogecoin be above $0.20 on October 14?",
+        description=rules,
+        endDate="2026-10-14T16:00:00Z",
+    )
+    raw["events"] = [
+        {
+            "id": "e-1",
+            "title": "Dogecoin above ___ on October 14?",
+            "description": rules,
+            "endDate": raw["endDate"],
+        }
+    ]
+    assert normalize_market(raw, NOW)["association_status"] == "PENDING"
+    assert (
+        normalize_market(raw, NOW, subject_aliases=("DOGE", "Dogecoin"))["association_status"]
+        == "VERIFIED_SHARED_RULES_OBJECT_PERIOD"
+    )
+    raw.update(liquidityNum="15000", version="v2")
+    assert (
+        normalize_market(raw, NOW, "GAMMA_NUM_DOLLAR_FIELDS_V1")["metric_unit_contract"]
+        == "UNVERIFIED"
+    )

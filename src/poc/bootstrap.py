@@ -9,6 +9,7 @@ from dotenv import dotenv_values
 from poc.adapters.outbound.sqlite import SQLiteStorage
 from poc.application.sessions import SessionManager
 from poc.config import Config, load_config
+from poc.domain.primitives import DomainError
 
 
 class SystemClock:
@@ -24,15 +25,23 @@ def configuration(path: str | Path, load_environment: bool = True) -> Config:
             "POLYMARKET_PROXY_URL",
             "POC_DATA_DIR",
         }
-        for name, value in dotenv_values(Path.cwd() / ".env").items():
+        explicit_file = os.environ.get("POC_ENV_FILE")
+        env_path = Path(explicit_file) if explicit_file else Path.cwd() / ".env"
+        if explicit_file and not env_path.is_file():
+            raise DomainError("Credentials file is unavailable")
+        for name, value in dotenv_values(env_path, interpolate=False).items():
             if name in allowed and value is not None:
-                os.environ.setdefault(name, value)
+                if name == "POC_DATA_DIR":
+                    os.environ.setdefault(name, value)
+                else:
+                    # The configured local file is authoritative for provider credentials.
+                    os.environ[name] = value
     config = load_config(path)
     directory = os.environ.get("POC_DATA_DIR")
     if directory:
         data = config.model_dump(mode="json")
         data["app"]["data_dir"] = directory
-        config = Config.model_validate(data)
+        config = type(config).model_validate(data)
     return config
 
 

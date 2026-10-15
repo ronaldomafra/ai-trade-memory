@@ -62,3 +62,25 @@ def test_cli_requires_explicit_session_and_rejects_missing_restore(tmp_path, mon
     assert main(["status", "--run-id", "missing"]) == 2
     assert "does not exist" in capsys.readouterr().err
     assert not list(tmp_path.rglob("*.sqlite3"))
+
+
+def test_global_budget_cli_only_changes_isolated_operational_policy(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("POC_DATA_DIR", str(tmp_path))
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("Budget configuration must never call a provider")
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", no_network)
+    assert main(["ai-budget"]) == 0
+    assert json.loads(capsys.readouterr().out)["legacy"]["policy"]["cost_limit_enabled"]
+    assert main(["ai-budget", "--legacy-global", "--disable-cost-limit"]) == 0
+    assert not json.loads(capsys.readouterr().out)["policy"]["cost_limit_enabled"]
+    assert (
+        main(["ai-budget", "--legacy-global", "--enable-cost-limit", "--daily-limit-usd", "0.15"])
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["policy"]["cost_limit_enabled"]
+    assert result["policy"]["max_observed_cost_usd_per_day"] == "0.15"
+    assert result["physical_attempts"] == 0
+    assert not (tmp_path / "sessions").exists()

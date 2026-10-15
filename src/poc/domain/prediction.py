@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
-from poc.domain.external import clean_text
+from poc.domain.external import ALIASES, clean_text
 from poc.domain.primitives import DomainError, decimal, iso, stable_id, utc
 
 
@@ -31,12 +31,60 @@ def array(value) -> list:
     return data
 
 
-def occurrence_association(raw: dict, observed_at: datetime) -> dict:
-    """Verify only identical complete propositions; broader provider groups stay pending.
+def threshold_title(text: str) -> str:
+    text = clean_text(text, 20000).casefold().strip(" ?")
+    text = re.sub(r"^will (?:the price of )?", "", text)
+    text = re.sub(r"\bbe (above|below)\b", r"\1", text)
+    text = re.sub(r"\$[0-9][0-9,.]*|_+", "_", text)
+    return " ".join(text.split())
 
-    Identical question and complete resolution rules bind the same object/period
-    without extracting a schedule or assuming provider IDs are independent events.
-    Different questions in a bundle require additional semantic evidence.
+
+def shared_rule_identity(
+    raw: dict, parent: dict, question: str, rules: str, subject_aliases: tuple[str, ...] = ()
+) -> dict | None:
+    """Bind threshold siblings only with matching rules, subject, title window and deadline."""
+    title = parent.get("title", "")
+    template = threshold_title(question)
+    if not title or not rules or threshold_title(title) != template:
+        return None
+    if not re.search(r"\b(?:above|below) _(?: |$)", template):
+        return None
+    if clean_text(parent.get("description", ""), 20000) != rules:
+        return None
+    try:
+        deadline = utc(raw["endDate"])
+        if deadline != utc(parent["endDate"]):
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    known = {key: (key.lower(), *values, key.lower() + "usdt") for key, values in ALIASES.items()}
+    if subject_aliases:
+        key = subject_aliases[0].upper()
+        known[key] = tuple(
+            dict.fromkeys((*known.get(key, ()), *(a.casefold() for a in subject_aliases)))
+        )
+    subjects = []
+    for key, aliases in known.items():
+        pattern = r"(?<![a-z0-9])(?:" + "|".join(re.escape(a) for a in aliases) + r")(?![a-z0-9])"
+        if all(re.search(pattern, text.casefold()) for text in (question, title, rules)):
+            subjects.append(key)
+    if not subjects:
+        return None
+    return {
+        "subjects": subjects,
+        "question_template": template,
+        "resolution_deadline": iso(deadline),
+    }
+
+
+def occurrence_association(
+    raw: dict, observed_at: datetime, subject_aliases: tuple[str, ...] = ()
+) -> dict:
+    """Verify identical propositions or threshold siblings with a complete matching contract.
+
+    Shared IDs alone never prove identity. Rules, explicit subject, the entire
+    threshold-title template and resolution deadline must match for siblings.
+    This grouping does not infer impact timing or participant independence.
     """
     question = clean_text(raw["question"], 20000)
     rules = clean_text(raw.get("description", ""), 20000)
@@ -57,17 +105,37 @@ def occurrence_association(raw: dict, observed_at: datetime) -> dict:
             and clean_text(title, 20000) == question
             and clean_text(description, 20000) == rules
         )
+    shared = None
+    if not matched and complete and len(event_ids) == 1 and parents:
+        proofs = [
+            shared_rule_identity(raw, parent, question, rules, subject_aliases)
+            for parent in parents
+            if len(parent.get("title", "")) <= 20000 and len(parent.get("description", "")) <= 20000
+        ]
+        if len(proofs) == len(parents) and proofs and all(proof == proofs[0] for proof in proofs):
+            shared = proofs[0]
     return {
         "provider_event_ids": event_ids,
         "occurrence_id": stable_id("poly_occurrence_literal_v1", question, rules)
         if matched
+        else stable_id("poly_occurrence_shared_rules_v1", rules, shared)
+        if shared
         else None,
-        "association_status": "VERIFIED_LITERAL_PROPOSITION" if matched else "PENDING",
+        "association_status": "VERIFIED_LITERAL_PROPOSITION"
+        if matched
+        else "VERIFIED_SHARED_RULES_OBJECT_PERIOD"
+        if shared
+        else "PENDING",
         "association_evidence": {
-            "version": "poly_occurrence_literal_v1",
+            "version": "poly_occurrence_shared_rules_v1"
+            if shared
+            else "poly_occurrence_literal_v1",
             "reason": "IDENTICAL_COMPLETE_QUESTION_AND_RULES"
             if matched
+            else "IDENTICAL_COMPLETE_RULES_EXPLICIT_SUBJECT_AND_PERIOD"
+            if shared
             else "PROVIDER_GROUP_REQUIRES_OBJECT_PERIOD_EVIDENCE",
+            **({"object_period_evidence": shared} if shared else {}),
             "question": question,
             "rules": rules,
             "parent_propositions": [
@@ -87,7 +155,10 @@ def occurrence_association(raw: dict, observed_at: datetime) -> dict:
 
 
 def normalize_market(
-    raw: dict, observed_at: datetime, metric_unit_contract: str | None = None
+    raw: dict,
+    observed_at: datetime,
+    metric_unit_contract: str | None = None,
+    subject_aliases: tuple[str, ...] = (),
 ) -> dict:
     outcomes, tokens = array(raw["outcomes"]), array(raw["clobTokenIds"])
     if (
@@ -104,14 +175,27 @@ def normalize_market(
     if not re.fullmatch(r"0x[0-9a-fA-F]{64}", condition) or not isinstance(raw["id"], str):
         raise DomainError("Invalid market condition identity")
     selected = next((i for i, value in enumerate(outcomes) if value.casefold() == "yes"), 0)
-    association = occurrence_association(raw, observed_at)
+    association = occurrence_association(raw, observed_at, subject_aliases)
     events = [event for event in raw.get("events", []) if isinstance(event, dict)]
     question = clean_text(raw["question"], 300)
     description = clean_text(raw.get("description", ""), 600)
     if not question:
         raise DomainError("Missing prediction question")
-    liquidity = raw.get("liquidityClob", raw.get("liquidityNum"))
-    volume = raw.get("volume24hrClob", raw.get("volume24hr"))
+    dollar_fields = metric_unit_contract == "GAMMA_NUM_DOLLAR_FIELDS_V1"
+    liquidity = (
+        raw.get("liquidityNum")
+        if dollar_fields
+        else raw.get("liquidityClob", raw.get("liquidityNum"))
+    )
+    volume = (
+        raw.get("volume24hr") if dollar_fields else raw.get("volume24hrClob", raw.get("volume24hr"))
+    )
+    verified_dollars = (
+        dollar_fields
+        and raw.get("version", "v1") == "v1"
+        and liquidity is not None
+        and volume is not None
+    )
     return {
         "market_id": raw["id"],
         "url": "https://polymarket.com/event/"
@@ -148,7 +232,28 @@ def normalize_market(
         "volume_observed_at": iso(observed_at),
         "liquidity_reported": str(decimal(liquidity)) if liquidity is not None else None,
         "volume_24h_reported": str(decimal(volume)) if volume is not None else None,
-        "metric_unit_contract": metric_unit_contract or "UNVERIFIED",
+        "metric_unit_contract": ("REPORTED_USD_V1" if verified_dollars else "UNVERIFIED")
+        if dollar_fields
+        else metric_unit_contract or "UNVERIFIED",
+        "metric_fields": {"liquidity": "liquidityNum", "volume_24h": "volume24hr"}
+        if dollar_fields
+        else {"liquidity": "liquidityClob", "volume_24h": "volume24hrClob"},
+        "metric_source_contract": metric_unit_contract or "UNVERIFIED",
+        **(
+            {
+                "metric_verification": {
+                    "contract": "GAMMA_NUM_DOLLAR_FIELDS_V1",
+                    "scope": "REPORTED_MARKET_TOTALS_NOT_ORDERBOOK_DEPTH",
+                    "nominal_currency": "USD",
+                    "references": [
+                        "https://docs.polymarket.com/market-data/market-details",
+                        "https://github.com/Polymarket/polymarket-cli/blob/main/src/output/markets.rs",
+                    ],
+                }
+            }
+            if verified_dollars
+            else {}
+        ),
         "content_hash": stable_id(
             association["association_evidence"]["question"],
             association["association_evidence"]["rules"],
@@ -215,7 +320,8 @@ def metadata_quality(market: dict, cutoff: datetime, limits: PredictionLimits) -
     if not market["active"] or not market["orderbook_enabled"]:
         reasons.append("INACTIVE_OR_NO_ORDERBOOK")
     if (
-        market["association_status"] != "VERIFIED_LITERAL_PROPOSITION"
+        market["association_status"]
+        not in ("VERIFIED_LITERAL_PROPOSITION", "VERIFIED_SHARED_RULES_OBJECT_PERIOD")
         or not market["occurrence_id"]
     ):
         reasons.append("OCCURRENCE_ASSOCIATION_PENDING")

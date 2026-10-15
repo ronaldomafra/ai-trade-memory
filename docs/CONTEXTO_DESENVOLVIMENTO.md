@@ -1,10 +1,22 @@
 # Contexto de desenvolvimento — desenho fechado
 
+**D059/SPEC 1.57:** limites JEV são editáveis no perfil/criação e aplicados
+por bot/sessão (SESSION). Total agregado é somente relatório; contadores, custos
+físicos e recibos permanecem transacionais e não são zerados na retomada.
+Templates `.3`; exemplos em [GUIA_PERFIS_BOTS.md](GUIA_PERFIS_BOTS.md).
+
 Ler [SPEC.md](SPEC.md) integralmente antes de planejar/editar/executar código. [Escopo](ESCOPO_POC_V1.md) e [backlog](BACKLOG_IMPLEMENTACAO.md) organizam entrega; D050 encerra microaprovações, não software.
 
 Marcos 1–5 na ordem: base/contabilidade offline; mercado/ciclos/Docker; JEV/custo/orçamento; labels/memória/dataset; fontes/fatores/operação/relatórios. Depois runtime/transferência/REST-auth/WS/TUI/aceite conforme [plano E06–E11](PLANO_DESENVOLVIMENTO_V1.md). Catálogo inicial trend_15m_v1, par Spot USDT por sessão, banco/container próprios e A/B/C de 100 USDT cada.
 
 ## Invariantes
+
+**Próxima extensão D056/SPEC 1.54:** após observar/corrigir o core atual, seguir
+[PLANO_PERFIS_ESTRATEGIA.md](PLANO_PERFIS_ESTRATEGIA.md) P00–P09. Inclui cadastro
+de perfis por templates completos e instruções JEV, swing/scalping/day trade,
+Config/learning/dataset V2 e compatibilidade legada. Hold posterior. Os YAMLs em
+docs/templates/perfis são propostas, não configs aceitas pelo runtime atual.
+Não implementar outro estilo alterando somente intervalos ou instruções textuais.
 
 - Hexagonal/portas/bootstrap conforme [arquitetura](ARQUITETURA.md); domínio sem HTTP/SQLite/interface. Commit único fill/ledger/saldo/eventos, JSONL reconstruível; Decimal, cutoff, revalidação de risco e lock.
 - Mercado público somente leitura; nenhum cliente capaz de ordens reais, credencial de exchange, short/futuros/alavancagem.

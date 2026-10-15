@@ -1,5 +1,7 @@
 # Notícias cripto e expectativas do Polymarket
 
+**Implementação atual — 13/10/2026:** descoberta Gamma por tag da moeda e juros, com cinco leituras físicas no máximo por revisão, incluindo tags. Métricas nominais USD usam `liquidityNum` e `volume24hr` no contrato v1: a [referência de mercados](https://docs.polymarket.com/market-data/market-details) descreve as métricas e o [CLI oficial](https://github.com/Polymarket/polymarket-cli/blob/main/src/output/markets.rs) demonstra a escala monetária desses campos. Aliases CLOB sem contrato não são usados como substitutos. Associação de mercados de faixas exige regras completas idênticas, ativo explícito e mesmo objeto/período/prazo, preservando datas e horários; agrupamentos ambíguos continuam pendentes. Todos os filtros quantitativos e a classificação JEV permanecem obrigatórios. Cobertura é limitada aos temas consultados, sem afirmar ausência global. Notas antigas abaixo registram a evolução das decisões; consulte o [status](STATUS_DESENVOLVIMENTO.md) para a evidência operacional.
+
 **Escopo vigente D051/D052/SPEC 1.50:** [plano ordenado](PLANO_DESENVOLVIMENTO_V1.md) e [status](STATUS_DESENVOLVIMENTO.md). Catálogo inicial trend_15m_v1, TUI remota REST/WSS com token/2FA e transferência automática separada na V1; outros estilos são evolução. Notas antigas de pendências são históricas. Implementação/validação pendentes.
 
 **Contexto externo aprovado:** notícias e Polymarket com fatores separados e evidência curta, mesma base B/C; critérios e políticas D002/D018–D049 no [contrato vigente](SPEC.md). P012 encerrado para discussão; detalhes técnicos serão resolvidos na implementação, de forma proporcional à POC. Implementação/validação pendentes.
@@ -157,6 +159,29 @@ Calcular variações somente a partir de snapshots observados até o início da 
 Considerar spread, profundidade, atividade recente, frescor e prazo ao definir se um sinal é utilizável. Quantidade de usuários da plataforma, volume agregado e número de comentários não garantem a qualidade de um mercado específico. Os limites objetivos serão definidos em P011.
 
 Uma fonte indisponível não representa expectativa neutra nem 50%. Preservar status independente para API de notícias e Polymarket. O Risk Engine e o Paper Broker continuam soberanos; nenhuma probabilidade cria automaticamente uma ordem.
+
+## Reaproveitamento de notícias D055 — preparado sem implantação
+
+O cache anterior incluía os demais artigos na identidade de cada classificação.
+Entrar uma notícia nova podia provocar a reclassificação das cinco selecionadas.
+O desenho preparado separa interpretação individual (`news_factors_v3`) e
+comparação factual compartilhada (`news_conflicts_v1`): uma chamada estruturada
+para conflitos do conjunto, com cache independente da ordem dos artigos.
+
+Trocar uma entre cinco notícias exige uma interpretação nova e uma comparação;
+as quatro interpretações antigas são reutilizadas. Corrigir conteúdo/hash ou
+mudar ativo/modelo/critérios invalida somente as interpretações afetadas. A
+primeira carga ainda exige cinco interpretações e uma comparação. Economia de
+fatura precisa ser observada após implantação; quantidade de chamadas não é
+proporcional exata ao custo de cada payload.
+
+Comparação nova pendente/falha mantém conflito indeterminado e cobertura parcial,
+sem aproveitar a ausência de conflito de outro conjunto. Gates de fundamento
+continuam ativos. Datas/TTL não são renovados; modelo/chamadas, versões e tempos
+das etapas permanecem na auditoria. Recibos adicionais não entram no prompt de
+negociação. Orçamento global e limite de tentativas continuam vigentes; sem novos
+modelos/provedores e sem alterar o contrato semântico Polymarket existente.
+Ver SPEC 5.29.1 e o status para implantação.
 
 ## Comparação e conteúdo da TUI
 

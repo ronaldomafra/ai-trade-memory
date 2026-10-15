@@ -5,7 +5,7 @@ from decimal import Decimal
 from poc.domain.models import checked_money
 from poc.domain.primitives import DomainError, utc
 
-INTERVAL_SECONDS = {"15m": 900, "1h": 3600}
+INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 
 
 @dataclass(frozen=True)

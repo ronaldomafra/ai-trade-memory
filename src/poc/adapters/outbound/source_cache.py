@@ -65,12 +65,29 @@ class SourceCache:
                 "SELECT * FROM collections WHERE request_id=?", (identity,)
             ).fetchone()
             if previous:
+                cached = (
+                    json.loads(previous["response_json"]) if previous["response_json"] else None
+                )
+                if (
+                    provider == "context-classification"
+                    and scope.get("retry_session_budget") is True
+                    and previous["finished_at"]
+                    and utc(previous["finished_at"]) <= utc(now)
+                    and cached
+                    and cached.get("reason") in ("AI_BUDGET_EXCEEDED", "AI_BUDGET_EXHAUSTED")
+                ):
+                    # A payer's budget refusal is not a failure of the shared evidence.
+                    # Reclaim atomically; keep the common in-flight claim across funded bots.
+                    self.connection.execute(
+                        "UPDATE collections SET reserved_at=?,finished_at=NULL,"
+                        "response_json=NULL,status='RESERVED' WHERE request_id=?",
+                        (iso(now), identity),
+                    )
+                    return {"granted": True, "request_id": identity}
                 return {
                     "granted": False,
                     "request_id": identity,
-                    "cached": json.loads(previous["response_json"])
-                    if previous["response_json"]
-                    else None,
+                    "cached": cached,
                     "reason": "SHARED_SLOT"
                     if previous["finished_at"]
                     else "COLLECTION_INDETERMINATE",

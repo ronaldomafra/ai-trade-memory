@@ -3,6 +3,7 @@
 import asyncio
 import ipaddress
 import re
+from contextlib import closing
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -11,19 +12,23 @@ import httpx
 from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, ValidationError
 
 from poc.adapters.inbound.body_limit import MAX_REQUEST_BYTES, BodyLimit
 from poc.adapters.inbound.event_ws import register_stream
 from poc.adapters.outbound.auth import AuthStore
+from poc.adapters.outbound.budget import AIBudget
 from poc.adapters.outbound.control_store import ControlStore
 from poc.adapters.outbound.datasets import DatasetFiles, read_dataset
+from poc.adapters.outbound.profiles import SQLiteProfiles
 from poc.adapters.outbound.session_view import SessionViews
 from poc.application.control import ControlService, public_settings
 from poc.application.ports import Clock
-from poc.config import Config
+from poc.application.profiles import ProfileService
+from poc.config import GlobalAICostLimit, PositiveMoney, parse_config
 from poc.domain.primitives import DomainError
 from poc.domain.security import AuthenticationError, PermissionDenied, Principal
+from poc.profile_config import ProfileDefinition, Style
 
 
 class Body(BaseModel):
@@ -47,7 +52,9 @@ class Refresh(Body):
 
 
 class Prepare(Body):
-    profile_id: Literal["trend_15m_v1"]
+    profile_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,63}$")
+    profile_version: int | None = Field(default=None, gt=0)
+    profile_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     symbol: str = Field(pattern=r"^[A-Z0-9]{2,30}USDT$")
     run_id: str | None = None
     overrides: dict = Field(default_factory=dict)
@@ -56,6 +63,12 @@ class Prepare(Body):
 
 class ImportDataset(Body):
     dataset_id: str
+
+
+class ConfigureGlobalAIBudget(GlobalAICostLimit):
+    # PUT replaces both settings explicitly; omitting the value must never reset it.
+    cost_limit_enabled: StrictBool = Field(...)
+    max_observed_cost_usd_per_day: PositiveMoney = Field(...)
 
 
 def loopback(host: str) -> bool:
@@ -73,6 +86,10 @@ def gateway_api(
     clock: Clock,
     http: httpx.AsyncClient,
 ) -> FastAPI:
+    if service.profile_service is None:
+        service.profile_service = ProfileService(
+            SQLiteProfiles(commands.connection), service.template
+        )
     app = FastAPI(title="ai-trade-memory control API", version="1", docs_url=None, redoc_url=None)
 
     @app.middleware("http")
@@ -193,6 +210,141 @@ def gateway_api(
     async def profiles(user: Actor):
         return service.profiles()
 
+    @app.get("/v1/profile-template")
+    async def profile_template(user: Actor, style: Style = "DAY_TRADE"):
+        return service.profile_service.template(style)
+
+    @app.post("/v1/profiles/validate")
+    async def validate_profile(body: ProfileDefinition, user: Actor):
+        return service.profile_service.validate(body.model_dump(mode="json"))
+
+    @app.get("/v1/profiles/{profile_id}/versions/{version}")
+    async def profile_version(profile_id: str, version: int, user: Actor):
+        record = service.profile_service.repository.profile(profile_id, version)
+        if record is None:
+            raise DomainError("Profile revision not found")
+        return {"profile": record}
+
+    async def profile_command(user, key, profile_id, version, action, definition=None):
+        global_permission(user, "manage")
+        body = {
+            "profile_id": profile_id,
+            "version": version,
+            "action": action,
+            "definition": definition,
+        }
+        command = commands.reserve_command(
+            user.user_id,
+            command_key(key),
+            "PROFILE_" + action.upper(),
+            body,
+            profile_id,
+            clock.now(),
+        )
+        if command["response"] is not None:
+            return command["response"]
+        result = (
+            service.profile_service.register(definition, user.user_id, clock.now())
+            if action == "register"
+            else service.profile_service.transition(
+                profile_id, version, action, user.user_id, clock.now()
+            )
+        )
+        response = {"profile": result, "command_id": command["command_id"]}
+        commands.finish_command(command["command_id"], response, clock.now())
+        return response
+
+    @app.post("/v1/profiles", status_code=201)
+    async def register_profile(
+        body: ProfileDefinition, user: Actor, idempotency_key: str | None = Header(default=None)
+    ):
+        return await profile_command(
+            user,
+            idempotency_key,
+            body.profile.profile_id,
+            body.profile.version,
+            "register",
+            body.model_dump(mode="json"),
+        )
+
+    @app.post("/v1/profiles/{profile_id}/versions", status_code=201)
+    async def new_profile_version(
+        profile_id: str,
+        body: ProfileDefinition,
+        user: Actor,
+        idempotency_key: str | None = Header(default=None),
+    ):
+        if profile_id != body.profile.profile_id:
+            raise DomainError("Profile path and definition disagree")
+        return await profile_command(
+            user,
+            idempotency_key,
+            profile_id,
+            body.profile.version,
+            "register",
+            body.model_dump(mode="json"),
+        )
+
+    @app.post("/v1/profiles/{profile_id}/versions/{version}/publish")
+    async def publish_profile(
+        profile_id: str,
+        version: int,
+        user: Actor,
+        idempotency_key: str | None = Header(default=None),
+    ):
+        return await profile_command(user, idempotency_key, profile_id, version, "publish")
+
+    @app.post("/v1/profiles/{profile_id}/versions/{version}/archive")
+    async def archive_profile(
+        profile_id: str,
+        version: int,
+        user: Actor,
+        idempotency_key: str | None = Header(default=None),
+    ):
+        return await profile_command(user, idempotency_key, profile_id, version, "archive")
+
+    @app.get("/v1/ai-budget")
+    async def ai_budget(user: Actor):
+        global_permission(user, "read")
+        with closing(
+            AIBudget(Path(service.template.app.data_dir) / "operational" / "ai-budget.sqlite3")
+        ) as budget:
+            return budget.aggregate_status(clock.now())
+
+    @app.put("/v1/ai-budget")
+    async def configure_ai_budget(body: ConfigureGlobalAIBudget, user: Actor):
+        global_permission(user, "manage")
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "Configure AI limits in the profile/session ai parameters. "
+                "Global budget writes are retired for new bots."
+            },
+        )
+
+    @app.put("/v1/legacy-ai-budget")
+    async def configure_legacy_ai_budget(body: ConfigureGlobalAIBudget, user: Actor):
+        global_permission(user, "manage")
+        with closing(
+            AIBudget(Path(service.template.app.data_dir) / "operational" / "ai-budget.sqlite3")
+        ) as budget:
+            return budget.set_cost_limit(body, clock.now(), user.user_id)
+
+    @app.get("/v1/sessions/{run_id}/ai-budget")
+    async def session_ai_budget(run_id: str, user: Actor):
+        user.require("read", run_id)
+        with closing(views.database(run_id, readonly=True)) as database:
+            record = database.run()
+            settings = record["config"]["ai"]
+        with closing(
+            AIBudget(Path(service.template.app.data_dir) / "operational" / "ai-budget.sqlite3")
+        ) as budget:
+            return {
+                **budget.session_status(clock.now(), run_id, settings),
+                "profile_id": record["profile_id"],
+                "profile_version": record["profile_version"],
+            }
+
     @app.get("/v1/sessions")
     async def sessions(user: Actor):
         records = views.list()
@@ -277,10 +429,12 @@ def gateway_api(
             return {
                 "run_id": run_id,
                 "profile_id": record["profile_id"],
+                "profile_version": record["profile_version"],
+                "profile_hash": record.get("profile_hash"),
                 "symbol": record["symbol"],
                 "config_hash": record["config_hash"],
                 "editable": False,
-                "settings": public_settings(Config.model_validate(record["config"])),
+                "settings": public_settings(parse_config(record["config"])),
             }
         finally:
             db.close()

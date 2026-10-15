@@ -21,6 +21,17 @@ def normalize_features(features: dict) -> dict:
         if value <= 0:
             raise DomainError("Invalid EMA denominator")
         values["price_" + field + "_ratio"] = str(close / value)
+    if features.get("feature_version") == "profile_features_v2":
+        from poc.domain.candles import INTERVAL_SECONDS
+
+        interval = features["decision_interval"]
+        values["decision_interval_seconds"] = INTERVAL_SECONDS[interval]
+        values["trend_interval_seconds"] = INTERVAL_SECONDS[features["trend_interval"]]
+        values["rsi_period"] = features["rsi_period"]
+        values["return_horizons_seconds"] = [
+            h * INTERVAL_SECONDS[interval] for h in features["return_horizons_bars"]
+        ]
+        values["returns_pct"] = [str(decimal(str(v))) for v in features["returns_pct"]]
     return values
 
 

@@ -1,12 +1,37 @@
 import asyncio
 import hashlib
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 
 from poc.adapters.outbound.control_client import ControlClient, server_url
 from poc.domain.primitives import DomainError
+
+
+@pytest.mark.asyncio
+async def test_login_keeps_server_challenge_expiry_without_tokens_or_2fa_bypass():
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={"challenge_token": "synthetic-challenge", "expires_at": "2026-10-13T15:00:00Z"},
+        )
+
+    http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://server.example"
+    )
+    client = ControlClient("https://server.example", http)
+    try:
+        assert await client.login("owner", "synthetic-password") == "synthetic-challenge"
+        assert client.challenge_expires_at == datetime(2026, 10, 13, 15, tzinfo=UTC)
+        assert client.access_token is None and client.refresh_token is None
+        assert requests == ["/v1/auth/login"]
+    finally:
+        await client.close()
 
 
 @pytest.mark.parametrize(

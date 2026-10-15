@@ -1,13 +1,13 @@
 # Pontos da discussão — histórico e destinação final
 
-**Documentação vigente D050–D052/SPEC 1.50.** Não há rodada ativa de perguntas. [Escopo V1](ESCOPO_POC_V1.md) · [Contrato](SPEC.md) · [Backlog técnico](BACKLOG_IMPLEMENTACAO.md).
+**Documentação vigente D050–D056/SPEC 1.54.** Não há rodada ativa de perguntas. D056 planeja cadastro/templates de swing, scalping e day trade após revisar o core; hold adiado. [Plano de perfis](PLANO_PERFIS_ESTRATEGIA.md) · [Escopo V1](ESCOPO_POC_V1.md) · [Contrato](SPEC.md) · [Backlog técnico](BACKLOG_IMPLEMENTACAO.md).
 
 Detalhes rotineiros são implementação/validação, com escolhas simples e testes. Preservar decisões; explicitar mudanças materiais. Fechar docs não conclui software/homologação.
 
 | Ponto | Destinação |
 | --- | --- |
 | P001–P005 | Regras aprovadas; implementar/testar. |
-| P006 | Seleção/template/configuração fechados; catálogo inicial trend_15m_v1, outros estilos como evolução. |
+| P006 | Catálogo implementado trend_15m_v1; D056 define plano P00–P09 para cadastro/templates completos de swing/scalping/day trade. Hold posterior. |
 | P007 | TUI remota REST/WSS/auth/2FA após núcleo, referência preservada; plano E08–E10. |
 | P008 | Deduplicação/origens mantidas; reportar dependência sem pesos/mínimos novos. Ajuste estatístico como evolução. |
 | P009 | Alinhamento documental concluído. |
@@ -15,11 +15,11 @@ Detalhes rotineiros são implementação/validação, com escolhas simples e tes
 | P013 | Dataset opcional acumulativo; implementar/testar. |
 | P014 | Transferência automática incluída na V1 em D052; SPEC 10.10/plano E07, local por símbolo. |
 | P015 | Orçamento mínimo 8.2.1; homologação após evidências. Sem aumento de limites/subcotas fixas. |
-| P016 | Hexagonal/Compose/controle remoto híbrido; lifecycle server-side, saúde/backup/24h E06–E11. |
+| P016 | Hexagonal/Compose/controle remoto híbrido; lifecycle server-side, saúde/backup e amostragem definida pelo usuário D054; E06–E11. |
 
 ## Histórico
 
-Notas abaixo preservam conversa/aprovações. Menções antigas a proposta ou discussão pendente são históricas; a destinação vigente é a tabela, D051/D052/SPEC 1.50. Não reabrir microaprovações por esses textos.
+Notas abaixo preservam conversa/aprovações. Menções antigas a proposta ou discussão pendente são históricas; a destinação vigente é a tabela, D056/SPEC 1.54. Não reabrir microaprovações por esses textos.
 
 ## Pontos da análise inicial
 

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from poc.application.execution import TradeIntent
 from poc.application.market_state import prefer_quote
-from poc.application.orchestrator import CycleCoordinator, cycle_identity, holding_bars
+from poc.application.orchestrator import CycleCoordinator, cycle_identity
 from poc.application.ports import (
     Clock,
     ContextPort,
@@ -17,9 +17,10 @@ from poc.application.ports import (
     SessionStore,
 )
 from poc.config import Config
-from poc.domain.candles import Candle, closed_sequence
+from poc.domain.candles import INTERVAL_SECONDS, Candle, closed_sequence
 from poc.domain.models import Action, MarketMetadata, MarketNotice, Quote
 from poc.domain.primitives import DomainError, iso, stable_id, utc
+from poc.domain.profiles import age_bars, boundary, parameters, scheduled_exit_due, seconds
 
 
 class LiveEngine:
@@ -59,6 +60,8 @@ class LiveEngine:
         self.startup_complete = asyncio.Event()
         self.instance_id = uuid4().hex
         self.event_counter = 0
+        self.profile = parameters(config)
+        self.last_rest_quote_at = None
 
     def request_stop(self) -> None:
         if self.status != "STOPPED":
@@ -89,12 +92,23 @@ class LiveEngine:
         async with self.history_lock:
             bars, hours = await asyncio.gather(
                 self.source.candles(
-                    self.metadata.symbol, "15m", self.config.market.warmup_15m_candles
+                    self.metadata.symbol,
+                    self.config.market.interval,
+                    self.config.market.warmup_15m_candles,
                 ),
                 self.source.candles(
-                    self.metadata.symbol, "1h", max(200, self.config.indicators.ema_mid + 1)
+                    self.metadata.symbol,
+                    self.config.market.trend_interval,
+                    self.profile.market.warmup_candles.trend
+                    if self.profile
+                    else max(200, self.config.indicators.ema_mid + 1),
                 ),
             )
+            if self.profile and (
+                len(bars) < self.profile.market.warmup_candles.decision
+                or len(hours) < self.profile.market.warmup_candles.trend
+            ):
+                raise DomainError("INSUFFICIENT_PROFILE_WARMUP")
             with self.store.transaction():
                 for candle in [*bars, *hours]:
                     self.store.save_candle(candle)
@@ -138,8 +152,8 @@ class LiveEngine:
         cycle_id = self.coordinator.active_cycle_id or stable_id(
             self.store.run()["run_id"],
             self.metadata.symbol,
-            "15m",
-            iso(self._closed_boundary(now) - timedelta(minutes=15)),
+            self.config.market.interval,
+            iso(self._closed_boundary(now) - timedelta(seconds=seconds(self.config))),
         )
         mark = self.last_mark_at is None or (now - self.last_mark_at).total_seconds() >= 60
         for wallet in self.store.wallets():
@@ -153,10 +167,13 @@ class LiveEngine:
                     now,
                     record_marks=mark,
                     hold_reason="RISK_MONITOR",
+                    forced_exit_reason="SESSION_WINDOW_CLOSED"
+                    if scheduled_exit_due(self.config, wallet.entry_at, now)
+                    else None,
                 ),
                 quote,
                 now,
-                holding_bars(wallet.entry_at, now),
+                age_bars(self.config, wallet.entry_at, now),
             )
         if mark:
             self.last_mark_at = now
@@ -180,7 +197,7 @@ class LiveEngine:
                     self.clock.now(),
                     stable_id("candle", candle.symbol, candle.interval, iso(candle.open_time)),
                 )
-        if candle.interval != "15m" or not new or self.live_after is None:
+        if candle.interval != self.config.market.interval or not new or self.live_after is None:
             return False
         if candle.close_time_exclusive <= self.live_after:
             return False
@@ -241,14 +258,23 @@ class LiveEngine:
                     or self.latest_quote is None
                     or not self.latest_quote.fresh(now, self.config.app.max_quote_age_seconds)
                 ):
-                    await self.accept_quote(
-                        await self.source.quote(self.metadata.symbol), force=True
-                    )
+                    if (
+                        self.profile is None
+                        or self.last_rest_quote_at is None
+                        or (now - self.last_rest_quote_at).total_seconds()
+                        >= self.profile.market.rest_fallback_poll_seconds
+                    ):
+                        self.last_rest_quote_at = now
+                        await self.accept_quote(
+                            await self.source.quote(self.metadata.symbol), force=True
+                        )
                 boundary = self._closed_boundary(now)
                 if self.last_poll_close is None or boundary > self.last_poll_close:
                     bars, hours = await asyncio.gather(
-                        self.source.candles(self.metadata.symbol, "15m", 3),
-                        self.source.candles(self.metadata.symbol, "1h", 3),
+                        self.source.candles(self.metadata.symbol, self.config.market.interval, 3),
+                        self.source.candles(
+                            self.metadata.symbol, self.config.market.trend_interval, 3
+                        ),
                     )
                     for candle in hours + bars:
                         await self.accept_candle(candle)
@@ -271,21 +297,25 @@ class LiveEngine:
             try:
                 try:
                     closed_sequence(
-                        self.store.candles(self.metadata.symbol, "15m"),
+                        self.store.candles(self.metadata.symbol, self.config.market.interval),
                         self.metadata.symbol,
-                        "15m",
+                        self.config.market.interval,
                         self.clock.now(),
                     )
                 except DomainError:
                     with self.store.transaction():
-                        self._event("MARKET_DATA_GAP", {"interval": "15m"})
+                        self._event("MARKET_DATA_GAP", {"interval": self.config.market.interval})
                     await self.recover_history()
-                hour_boundary = candle.close_time_exclusive.replace(
-                    minute=0, second=0, microsecond=0
+                hour_boundary = boundary(
+                    candle.close_time_exclusive, INTERVAL_SECONDS[self.config.market.trend_interval]
                 )
-                hours = self.store.candles(self.metadata.symbol, "1h", 1)
+                hours = self.store.candles(
+                    self.metadata.symbol, self.config.market.trend_interval, 1
+                )
                 if not hours or hours[-1].close_time_exclusive < hour_boundary:
-                    for hour in await self.source.candles(self.metadata.symbol, "1h", 3):
+                    for hour in await self.source.candles(
+                        self.metadata.symbol, self.config.market.trend_interval, 3
+                    ):
                         with self.store.transaction():
                             self.store.save_candle(hour)
                 if await self.coordinator.process(candle):
@@ -397,7 +427,5 @@ class LiveEngine:
         except TimeoutError:
             pass
 
-    @staticmethod
-    def _closed_boundary(now: datetime) -> datetime:
-        value = utc(now)
-        return value.replace(minute=value.minute // 15 * 15, second=0, microsecond=0)
+    def _closed_boundary(self, now: datetime) -> datetime:
+        return boundary(now, seconds(self.config))

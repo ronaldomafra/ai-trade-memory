@@ -1,6 +1,6 @@
 # Arquitetura da POC V1 completa
 
-**D012/D050–D052 · SPEC 1.50.** Desenho para implementação; software pendente.
+**D012/D050–D056 · SPEC 1.54.** Fronteiras preservadas; implementação/evidências no status e novos perfis planejados em P00–P09.
 [Plano](PLANO_DESENVOLVIMENTO_V1.md) · [Escopo](ESCOPO_POC_V1.md).
 
 ## Fronteiras
@@ -50,10 +50,18 @@ Memória local por símbolo; catálogo publica novas fontes e transferência val
 
 ## Operação
 
+Extensão D056: [perfis cadastráveis](PLANO_PERFIS_ESTRATEGIA.md) reutilizam o
+controle/SQLite e a imagem comum. Domínio define famílias e parâmetros; aplicação
+valida/registra/resolve perfis; adaptadores expõem CLI/REST/TUI e persistência.
+Revisões ficam em tabelas no control.sqlite3 existente, sem novo serviço/ledger.
+Cada sessão conserva snapshot completo imutável; restauração não depende da
+versão atual do catálogo. Cadastro não carrega código dinâmico nem parâmetros
+globais de segurança/custo. Swing/scalping/day trade planejados; hold posterior.
+
 Mesmo host/volumes locais/WAL: [SQLite](https://sqlite.org/wal.html). Sem cluster/distribuição de bancos. Compose restart unless-stopped, SIGTERM/grace, heartbeat, backup consistente/restore testado; CLI/systemd sem supervisor duplicado.
 
-240 chamadas físicas e US$ 0,05 observado/dia UTC globais, sem subcotas fixas inicialmente. Falta de orçamento => HOLD B/C e risco ativo; duas sessões não garantem inferência em cada candle.
+D059/SPEC 1.57: perfis cadastráveis definem orçamento JEV próprio por bot/sessão. `ai` contém chamadas/dia, habilitação do limite financeiro e valor USD/dia, editáveis antes da partida. Snapshot imutável por sessão; contadores/recibos transacionais por run_id no SQLite operacional compartilhado. Defaults de 240/US$ 0,05 não são tetos globais. Reuso de classificação/chamada B-C não duplica despesa; recusa por orçamento de um pagador não bloqueia outro. Total agregado apenas como relatório. D053 mantém somente compatibilidade das sessões antigas; falta de orçamento gera HOLD B/C com risco ativo.
 
 Hospedagem usa reverse proxy TLS e portas internas privadas. Rede/volumes/restart: [Docker networking](https://docs.docker.com/compose/how-tos/networking/), [volumes](https://docs.docker.com/engine/storage/volumes/), [restart](https://docs.docker.com/engine/containers/start-containers-automatically/). Leituras não comprovam runtime.
 
-Implementar Marcos 1–5, E06–E11; testar quota concorrente, auth/reconexão, transferência, crash/backup/24h. Sem frontend HTML ou operação financeira real.
+Implementar Marcos 1–5, E06–E11; testar quota concorrente, auth/reconexão, transferência, crash/backup e operação no período de amostragem definido pelo usuário (D054), sem mínimo de 24h ou espera para atualizar. Preservar histórico e identificar versões/intervalos nas análises. Sem frontend HTML ou operação financeira real.

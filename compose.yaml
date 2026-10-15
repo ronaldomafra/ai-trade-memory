@@ -13,12 +13,11 @@ services:
     environment:
       POC_DATA_DIR: /data
       POC_HOST_DATA_DIR: ${POC_HOST_DATA_DIR:-${PWD}/data}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      MARKETAUX_API_TOKEN: ${MARKETAUX_API_TOKEN:-}
-      POLYMARKET_PROXY_URL: ${POLYMARKET_PROXY_URL:-}
+      POC_ENV_FILE: /run/poc/credentials.env
     volumes:
       - ${POC_HOST_DATA_DIR:-${PWD}/data}:/data
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./.env:/run/poc/credentials.env:ro
     restart: unless-stopped
     stop_grace_period: 40s
   tls_proxy:
@@ -43,13 +42,12 @@ services:
     command: ["run", "--resume", "session-btc", "--serve", "--host", "0.0.0.0"]
     environment:
       POC_DATA_DIR: /data
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      MARKETAUX_API_TOKEN: ${MARKETAUX_API_TOKEN:-}
-      POLYMARKET_PROXY_URL: ${POLYMARKET_PROXY_URL:-}
+      POC_ENV_FILE: /run/poc/credentials.env
     volumes:
       - ./data/sessions/session-btc:/data/sessions/session-btc
       - ./data/operational:/data/operational
       - ./data/learning:/data/learning
+      - ./.env:/run/poc/credentials.env:ro
     restart: unless-stopped
     stop_grace_period: 40s
     healthcheck:
@@ -68,13 +66,12 @@ services:
     command: ["run", "--resume", "session-eth", "--serve", "--host", "0.0.0.0"]
     environment:
       POC_DATA_DIR: /data
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      MARKETAUX_API_TOKEN: ${MARKETAUX_API_TOKEN:-}
-      POLYMARKET_PROXY_URL: ${POLYMARKET_PROXY_URL:-}
+      POC_ENV_FILE: /run/poc/credentials.env
     volumes:
       - ./data/sessions/session-eth:/data/sessions/session-eth
       - ./data/operational:/data/operational
       - ./data/learning:/data/learning
+      - ./.env:/run/poc/credentials.env:ro
     restart: unless-stopped
     stop_grace_period: 40s
     healthcheck:

@@ -770,3 +770,211 @@ Preservar estados por fonte/recorte e fatores ainda válidos mesmo com cobertura
 **Destinação:** P014 vira entrega E07, substituindo exclusão de transferência em D050, preservando D008/D030/invariantes locais. Catálogo contínuo separado da base inicial imutável.
 
 **Ordem:** Marcos 1–5, runtime, transferência, REST/auth, WS, TUI, aceite. Plano E00–E11/status para execução longa sem microaprovações. Segundo estilo/HTML fora; docs não declaram software pronto.
+
+## D053 — Limite financeiro de IA configurável e opcional
+
+**Estado:** solicitado e alteração de core autorizada pelo usuário em 14/10/2026.
+**Restrição expressa original (prazo posteriormente revisto em D054):** preparar código e testes isolados; não executar os novos
+comandos/configurações nos dados reais, não construir/aplicar imagens nem
+reiniciar serviços durante o ensaio atual de 24 horas.
+
+O limite de custo observado passa a ter valor global configurável e opção de
+habilitar/desabilitar. Padrão continua habilitado em US$ 0,05/dia UTC. Um único
+orçamento para todas as sessões, separado do hash/configuração financeira dos
+experimentos; nova sessão não multiplica ou redefine uma política global explícita.
+
+Desabilitar o limite financeiro não remove a contagem/guarda de até 240 chamadas,
+circuito de credencial, prazos/retries, risco paper ou bloqueio de recuperação.
+Manter cobrança observada/unknown, histórico e contador sem reset; registrar
+revisão/ator/horário e política efetiva por reserva. Só proprietário global com
+permissão manage/2FA ou operador local pode alterar. CLI/API preparam a gestão;
+limite legado de sessão é fallback quando não há política global explícita.
+
+Valor positivo finito em Decimal, sem teto fixo de cinco centavos na política
+explícita. Reativar abaixo do já gasto bloqueia novas chamadas. O teto observado
+não garante valor absoluto da fatura em presença de envios em voo/unknown.
+Aplicação futura exige atualização compatível dos motores/controle; até lá o
+experimento continua com as regras/imagens e orçamento anteriores.
+
+**Contrato:** SPEC 1.51/8.2.2; sem alteração em A/B/C, capital, estratégia, taxas,
+slippage, dados de treino ou cadência. Implementação preparada não é implantação.
+
+## D054 — Período de amostragem sob controle do usuário
+
+**Definido pelo usuário em 14/10/2026:** remover a exigência de esperar 24 horas;
+o próprio usuário gerencia o período de coleta e solicita análises.
+
+Não há duração mínima obrigatória, espera para atualizar serviços ou necessidade
+de iniciar outra contagem de 24h após atualização. Analisar as amostras existentes
+no intervalo solicitado, informando cobertura, lacunas, reinícios e versões.
+Preservar bancos, carteiras, decisões, custos e aprendizado. Comparações que
+atravessem mudanças relevantes devem distinguir as versões e seus períodos.
+
+O observador é uma ferramenta opcional de leitura; seu prazo configurado não
+bloqueia o motor, atualizações ou análises. Seus registros históricos e detecção
+de lacunas continuam válidos; tempo transcorrido não comprova eficácia.
+
+Esta decisão substitui o mínimo de 24h do aceite e a espera temporal de D053.
+Não executa por si só implantação/reinício ou configuração do orçamento; D053
+permanece preparado no checkout. Regras de maturação e mínimos estatísticos da
+memória continuam vigentes, independentes do tempo escolhido para a análise.
+
+**Contrato:** SPEC 1.52, aceite operacional e plano E11. Revisão documental sem
+alteração de código, serviços, observadores ou dados operacionais.
+
+## D055 — Reaproveitar interpretação de notícia sem reclassificar por outros artigos
+
+**Solicitado e aprovado pelo usuário em 14/10/2026:** otimizar as classificações
+repetidas causadas apenas por mudança das outras notícias enviadas para comparação.
+
+Separar interpretação intrínseca da notícia e verificação factual do conjunto.
+Interpretações têm identidade por conteúdo/destino/modelo/critérios, sem pares;
+conflitos usam uma única chamada compartilhada por conjunto canônico de até cinco
+notícias. Trocar um artigo de cinco passa a exigir uma interpretação nova e uma
+comparação, em vez de repetir as cinco classificações completas. Primeira carga
+tem cinco interpretações e uma comparação; não prometer economia fixa de custo.
+
+Corrigir conteúdo reclassifica o artigo e a comparação afetada; reordenar não
+gera chamadas. Mudança do conjunto nunca reutiliza a indicação antiga de ausência
+de conflito. Falha/schema inválido/orçamento mantém conflito indeterminado,
+cobertura parcial e gates de compra existentes; não apagar a interpretação válida.
+Falhas podem ser recuperadas em janela posterior da coleta, sem repetição por
+leitura/renderização e respeitando reserva, tentativas físicas e orçamento global.
+
+Registrar IDs/modelos/evidências/tempos das duas etapas e fator composto disponível
+somente após ambas. Manter passado imutável e fonte com validade original.
+Recibos adicionais ficam na auditoria, sem inflar o prompt de negociação.
+Notícias usam `news_factors_v3`/`news_conflicts_v1`; Polymarket mantém contrato v2.
+Usar apenas título/resumo curto disponíveis, sem geração livre ou novo provedor.
+
+**Contrato:** SPEC 1.53/5.29.1. Implementação no checkout com testes offline;
+implantação não executada nesta tarefa. Sessão/carteiras/dados reais preservados.
+
+## D056 — Plano de perfis cadastráveis: swing, scalping e day trade
+
+**Solicitado pelo usuário em 14/10/2026:** criar plano de implementação que siga
+a arquitetura existente, pesquise estratégias a fundo e inclua perfis cadastráveis
+por template com todos os parâmetros. Estilos iniciais: swing, scalping e day
+trade; hold fica para um segundo momento.
+
+Sequência combinada: observar trend_15m_v1 para validar o core, analisar e corrigir
+falhas pequenas, implementar/homologar perfis e então abrir sessão dedicada a
+aproximadamente um mês numa estratégia escolhida. O período inicial é escolha
+do usuário, sem reinstalar o bloqueio de 24h removido em D054.
+
+Perfis devem orientar dados, sinais A, contexto/instruções B/C, risco, agenda,
+execução e aprendizado. A/B/C são comparações no mesmo perfil, não três estilos.
+Reutilizar hexagonal/portas, REST/WSS, TUI cliente, controle server-side e Docker
+por sessão. Cadastro parametriza famílias conhecidas, não executa código livre.
+
+Fixar revisão/snapshot/hash na sessão; novas versões não mudam bancos ativos.
+Preservar legado e dataset V1, separar protocolos/estilos e manter orçamento
+global. Valores de presets e famílias específicas no plano são **propostas
+técnicas experimentais**, sujeitas a validação, não decisões de calibração ou
+prova de retorno. Cadastro e novos estilos ainda não foram implementados.
+
+**Artefatos:** PLANO_PERFIS_ESTRATEGIA.md (P00–P09),
+PESQUISA_PERFIS_ESTRATEGIA.md e docs/templates/perfis/ (modelo completo + três
+presets independentes). **Contrato:** SPEC 1.54/4.1.1. Tarefa documental sem
+alteração de código, runtime, dados operacionais ou chamadas JEV.
+
+## D057 — Implementar cadastro genérico de perfis e bots pela TUI
+
+**Autorizado pelo usuário em 14/10/2026:** implementar a estrutura discutida na
+pesquisa/plano D056. Não criar um bot rígido de scalping ou um serviço por estilo:
+configuração, instruções e família implementada dão o comportamento ao motor
+comum. Permitir cadastro/duplicação/revisão/validação/publicação pela TUI, depois
+escolher moeda e criar nova sessão com o usuário.
+
+Parar imediatamente o motor atual para interromper novas chamadas pagas;
+preservar sessão ETH, bancos, credenciais, capital e evidências. Atualizar o
+controle sem iniciar novo motor. Sem autorização implícita para escolher moeda,
+publicar cadastros do usuário ou iniciar sessões automaticamente.
+
+Revisão publicada é imutável; snapshots/hash/originais/overrides são fixados na
+sessão. Pedidos de criação interrompidos fixam a revisão antes da consulta de
+metadados. Restore não depende do catálogo. Regras duras verificadas no código,
+sem execução de scripts/imports/expressões vindos do template ou da IA.
+
+Famílias suportadas: rompimento anterior, cruzamento e alinhamento de EMAs.
+Templates são dados completos de pré-configuração, ainda experimentais e sem
+comprovação financeira. Intervalos fixos 1m/5m/15m/1h/4h/1d, proteção independente
+da IA, agenda/cadência/custos, contexto JEV compacto e aprendizado V2 separado
+do legado. Permanecem paper Spot long-only, A/B/C e orçamento global existente.
+
+**Contrato:** SPEC 1.55/4.1.1. [Guia](GUIA_PERFIS_BOTS.md). Evidências e imagens
+de implantação em STATUS_DESENVOLVIMENTO.md. Funcionamento observado sem trades
+não comprova eficiência financeira ou vantagem do JEV.
+
+## D058 — Instruções dos perfis em inglês para o JEV
+
+**Autorizado pelo usuário em 14/10/2026:** ajustar objetivos e orientações de
+estratégia enviados ao JEV para inglês antes de iniciar os três novos bots.
+A [TypeSafe — Language support](https://docs.typesafe.ai/models#language-support)
+afirma que inglês é o idioma principal de treinamento e de melhor precisão
+atual; [State](https://docs.typesafe.ai/concepts/state) confirma precisão menor
+em outros idiomas. Essa orientação não demonstra ganho financeiro da POC.
+
+Traduzir os seis campos de instrução nos três templates empacotados, cópias
+documentais, template genérico e defaults do schema. Versionar instruções como
+`*_instructions_en_v2` e templates `.2`; manter os números e regras existentes.
+Questionários de negociação/classificação já estão em inglês, sem alteração
+de critérios ou invalidação desnecessária do cache semântico D055.
+
+Interface, nomes de exibição e documentação em português. Evidências externas
+conservam o texto original; não adicionar tradução automática, nova chamada IA
+ou custo por decisão. Não impor detecção heurística de idioma ao texto livre.
+Versões publicadas/sessões continuam imutáveis: revisão nova para mudar seu
+conteúdo, sem reescrever resultados nem substituir configuração na retomada.
+
+Controle/imagens devem entregar os novos templates antes de continuar o guia.
+Nenhum perfil é cadastrado/publicado e nenhum motor é iniciado por esta mudança.
+**Contrato:** SPEC 1.56; evidências no status.
+
+## D059 — Orçamento JEV definido no perfil e aplicado por bot
+
+**Definido pelo usuário em 14/10/2026:** limites não devem ser globais; cada
+estratégia pode justificar um gasto diferente, que será comparado ao resultado.
+Implementar defaults de chamadas/custo editáveis no perfil e na criação da
+sessão, com contadores próprios por bot/dia UTC. Duas sessões do mesmo perfil
+recebem cópias independentes; o total agregado não deve bloquear novos bots.
+
+Campos `ai.budget_scope=SESSION`, `max_calls_per_day` inteiro positivo,
+`cost_limit_enabled` booleano e `max_observed_cost_usd_per_day` Decimal positivo.
+Defaults 240/US$ 0,05/habilitado por bot, sem esses tetos globais ocultos. Custos
+incluem negociação, classificação e retries físicos; reuso/cache e chamada B/C
+compartilhada não duplicam cobrança. Reserva transacional antes do envio, hash
+da política por run_id, idempotência, desconhecidos e recuperação preservados.
+
+Perfil publicado e sessão são imutáveis; novas revisões mudam os padrões de
+partida, ajustes na criação ficam no snapshot desse bot. Perfis cadastráveis
+anteriores podem originar novas sessões SESSION sem reescrever o cadastro.
+Retomada antiga preserva schema/hash e contrato anterior. Escrita global é
+retirada do fluxo normal; compatibilidade antiga explicitamente identificada.
+Persistência compartilhada do orçamento não significa limite compartilhado.
+
+TUI mostra limites/uso diário da sessão. Gasto real USD é separado do resultado
+paper USDT; não prometer que o lucro cobrirá IA. Não implementar aumento automático
+de gasto em função de PnL. Cotas reais do provedor/Marketaux, circuito de credencial
+e bloqueio de recuperação incerta continuam independentes dos limites configurados.
+
+**Contrato:** SPEC 1.57/8.2.3. Guia: GUIA_PERFIS_BOTS.md. Nenhum novo bot iniciado
+automaticamente; manter a criação guiada de ZEC, SUI e UNI, uma sessão por vez.
+
+## D060 — Janela de 15 segundos no teste scalping ZEC
+
+**Autorizado pelo usuário em 14/10/2026:** ajustar o parâmetro e deixar o bot
+rodando ao final. O ciclo de 18:22 Brasília passou pelo filtro, mas gastou 2,3s
+na preparação e restaram 5,7s da janela de 8s; o cliente requer timeout completo
+de 6s e não enviou a inferência. Não confundir o HOLD operacional com escolha JEV.
+
+Aceitar até 15s em perfis SCALPING e publicar `scalping_zec_v1` revisão 2 com
+janela 15s. Preservar os demais parâmetros efetivos do teste ZEC (inclusive
+timeout 6s e orçamento da sessão US$ 0,50/240 chamadas). Não ampliar intervalo
+1m/5m, desativar filtros nem flexibilizar cotação/spread/desvio para forçar trade.
+
+Parar/preservar a sessão antiga e criar uma nova com a revisão 2; cada sessão
+mantém seu snapshot/hash, carteiras, custos e resultados. Não editar os registros
+antigos nem simular retrospectivamente oportunidades perdidas. Deixar o novo
+motor ativo. Quinze segundos são hipótese para observação; não garantem resposta,
+ordem, lucro ou eficiência. **Contrato:** SPEC 1.58/4.1.1; evidências no status.

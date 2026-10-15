@@ -6,7 +6,15 @@ from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    model_validator,
+)
 
 from poc.domain.primitives import canonical_json, decimal, stable_id
 
@@ -136,6 +144,13 @@ class News(Section):
         return self
 
 
+class GlobalAICostLimit(Section):
+    """Server-wide operational policy; never added to immutable session config/hash."""
+
+    cost_limit_enabled: StrictBool = True
+    max_observed_cost_usd_per_day: PositiveMoney = Decimal("0.05")
+
+
 class AI(Section):
     provider: Literal["openrouter"] = "openrouter"
     endpoint: Literal["https://openrouter.ai/api/alpha/decisions"] = (
@@ -263,4 +278,12 @@ def load_config(path: str | Path) -> Config:
         data = yaml.safe_load(stream)
     if not isinstance(data, dict):
         raise ValueError("Configuration must be a YAML mapping")
+    return parse_config(data)
+
+
+def parse_config(data: dict) -> Config:
+    if data.get("schema_version") == 2:
+        from poc.profile_config import ProfileConfig
+
+        return ProfileConfig.model_validate(data)
     return Config.model_validate(data)

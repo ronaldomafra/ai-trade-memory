@@ -36,16 +36,64 @@ class OpenRouterDecisions:
             clock,
         )
         self.store = store
+        self.sleep = sleep
+        self.credential_id = stable_id("openrouter-credential", key) if key else None
+        self.session_budget = getattr(config, "budget_scope", None) == "SESSION"
+        if self.session_budget:
+            budget.bind_session(
+                run_id,
+                config.max_calls_per_day,
+                config.max_observed_cost_usd_per_day,
+                config.cost_limit_enabled,
+                clock.now(),
+            )
         self.client = client or httpx.AsyncClient(
             timeout=config.timeout_seconds, follow_redirects=False, trust_env=False
         )
         self.owns_client = client is None
-        self.sleep = sleep
-        self.credential_id = stable_id("openrouter-credential", key) if key else None
 
     async def close(self):
         if self.owns_client:
             await self.client.aclose()
+
+    async def check_auth(self, recover: bool = False) -> dict:
+        """Explicit key GET, without inference, provider-body logging or budget reset."""
+        result = {
+            "scope": "OPENROUTER_KEY_CHECK_NO_INFERENCE",
+            "authenticated": False,
+            "http_status": None,
+            "auth_circuit_cleared": False,
+            "circuit_open": bool(self.credential_id and self.budget.circuit(self.credential_id)),
+            "error_code": None,
+        }
+        if not self.key:
+            return {**result, "error_code": "AI_NOT_CONFIGURED"}
+        started = self.clock.now()
+        try:
+            response = await self.client.get(
+                "https://openrouter.ai/api/v1/key",
+                headers={"Authorization": f"Bearer {self.key}"},
+                timeout=self.config.timeout_seconds,
+            )
+            result["http_status"] = response.status_code
+            if response.status_code != 200:
+                return {**result, "error_code": f"AI_HTTP_{response.status_code}"}
+            if len(response.content) > 262144:
+                return {**result, "error_code": "INVALID_AI_KEY_RESPONSE"}
+            data = response.json()
+            if not isinstance(data, dict) or not isinstance(data.get("data"), dict):
+                return {**result, "error_code": "INVALID_AI_KEY_RESPONSE"}
+        except httpx.TransportError:
+            return {**result, "error_code": "AI_AUTH_CHECK_UNAVAILABLE"}
+        except (ValueError, UnicodeDecodeError):
+            return {**result, "error_code": "INVALID_AI_KEY_RESPONSE"}
+        result["authenticated"] = True
+        if recover:
+            result["auth_circuit_cleared"] = self.budget.clear_verified_auth_circuit(
+                self.credential_id, started
+            )
+        result["circuit_open"] = self.budget.circuit(self.credential_id)
+        return result
 
     def reconcile(self):
         if self.store:
@@ -90,6 +138,11 @@ class OpenRouterDecisions:
                 self.config.max_calls_per_day,
                 self.config.max_observed_cost_usd_per_day,
                 self._safe(payload),
+                **(
+                    {"cost_limit_enabled": self.config.cost_limit_enabled}
+                    if self.session_budget
+                    else {}
+                ),
             )
             if not reservation["granted"]:
                 call_id = reservation.get("ai_call_id")

@@ -37,6 +37,7 @@ def parser() -> argparse.ArgumentParser:
         "run",
         "backfill",
         "smoke-openrouter",
+        "check-openrouter",
         "import-learning",
         "export-learning",
         "evaluate-outcomes",
@@ -52,6 +53,12 @@ def parser() -> argparse.ArgumentParser:
         "control-api",
         "tui",
         "observe",
+        "ai-budget",
+        "profile-template",
+        "profile-validate",
+        "profile-register",
+        "profile-publish",
+        "profile-archive",
     ):
         command = subs.add_parser(name)
         if name != "tui":
@@ -60,6 +67,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--profile", required=True)
             command.add_argument("--run-id", required=True)
             command.add_argument("--symbol")
+            command.add_argument("--profile-version", type=int)
         if name in ("status", "report", "export", "validate-data", "export-events"):
             command.add_argument("--run-id", required=True)
         if name == "run":
@@ -67,6 +75,7 @@ def parser() -> argparse.ArgumentParser:
             selection.add_argument("--new-session", action="store_true")
             selection.add_argument("--resume")
             command.add_argument("--profile")
+            command.add_argument("--profile-version", type=int)
             command.add_argument("--symbol")
             command.add_argument("--run-id")
             command.add_argument("--duration-seconds", type=float)
@@ -105,21 +114,66 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--server", required=True)
         if name == "smoke-offline":
             command.add_argument("--scope", choices=("pipeline", "accounting"), default="pipeline")
+        if name == "check-openrouter":
+            command.add_argument("--recover-auth", action="store_true")
         if name == "observe":
             command.add_argument("--run-id", action="append", required=True)
             command.add_argument("--output", required=True)
             command.add_argument("--duration-hours", type=float, default=24)
             command.add_argument("--poll-seconds", type=int, default=60)
+        if name == "ai-budget":
+            command.add_argument("--run-id", help="Read the selected bot's daily budget")
+            command.add_argument(
+                "--legacy-global", action="store_true", help="Legacy sessions only"
+            )
+            toggle = command.add_mutually_exclusive_group()
+            toggle.add_argument(
+                "--enable-cost-limit", dest="cost_limit_enabled", action="store_const", const=True
+            )
+            toggle.add_argument(
+                "--disable-cost-limit", dest="cost_limit_enabled", action="store_const", const=False
+            )
+            command.add_argument(
+                "--daily-limit-usd", help="Legacy-only observed-cost limit as a decimal string"
+            )
         if name == "export-events":
             command.add_argument("--rebuild", action="store_true")
+        if name == "profile-template":
+            command.add_argument(
+                "--style", choices=("swing", "scalping", "daytrade"), required=True
+            )
+            command.add_argument("--output", required=True)
+        if name in ("profile-validate", "profile-register"):
+            command.add_argument("--input", required=True)
+        if name in ("profile-publish", "profile-archive"):
+            command.add_argument("--profile", required=True)
+            command.add_argument("--version", type=int, required=True)
         if name in ("export", "report"):
             command.add_argument("--format", choices=["all", "json"], default="json")
     return result
 
 
 async def prepare(args, config):
+    profile_record = None
     if args.profile != PROFILE_ID:
-        raise DomainError("Unknown or unimplemented profile")
+        from poc.adapters.outbound.control_store import ControlStore
+        from poc.adapters.outbound.profiles import SQLiteProfiles
+        from poc.application.profiles import ProfileService
+        from poc.profile_config import ProfileDefinition, resolve_profile, with_session_budget
+
+        commands = ControlStore(Path(config.app.data_dir) / "control" / "control.sqlite3")
+        try:
+            profile, profile_record = ProfileService(
+                SQLiteProfiles(commands.connection), config
+            ).resolve(args.profile, getattr(args, "profile_version", None))
+            profile = ProfileDefinition.model_validate(
+                with_session_budget(profile.model_dump(mode="json"))
+            )
+            config = resolve_profile(
+                profile, config, args.symbol or profile.session_defaults.symbol
+            )
+        finally:
+            commands.close()
     valid_run_id(args.run_id)
     if args.symbol:
         data = config.model_dump(mode="json")
@@ -131,7 +185,11 @@ async def prepare(args, config):
     finally:
         await source.close()
     return session_manager(config).prepare(
-        args.run_id or "run-" + uuid4().hex[:16], args.profile, metadata, datetime.now(UTC)
+        args.run_id or "run-" + uuid4().hex[:16],
+        args.profile,
+        metadata,
+        datetime.now(UTC),
+        profile_record,
     )
 
 
@@ -146,7 +204,58 @@ def main(argv: list[str] | None = None) -> int:
             TradeApp(ControlClient(args.server)).run()
             return 0
         config = configuration(args.config)
-        if args.command == "observe":
+        if args.command == "ai-budget":
+            from poc.adapters.outbound.budget import AIBudget
+            from poc.config import GlobalAICostLimit
+
+            change = args.cost_limit_enabled is not None or args.daily_limit_usd is not None
+            if args.run_id and args.legacy_global:
+                raise DomainError("Choose a session or --legacy-global, not both")
+            if change and not args.legacy_global:
+                raise DomainError(
+                    "Configure AI limits in the profile/session ai parameters before creating "
+                    "the bot. Global writes require --legacy-global and affect only old sessions."
+                )
+            record = None
+            if args.run_id:
+                from poc.adapters.outbound.session_view import SessionViews
+
+                database = SessionViews(config).database(args.run_id, readonly=True)
+                try:
+                    record = database.run()
+                    if not record:
+                        raise DomainError("Missing session")
+                finally:
+                    database.close()
+            budget = AIBudget(Path(config.app.data_dir) / "operational" / "ai-budget.sqlite3")
+            try:
+                now = datetime.now(UTC)
+                if change:
+                    current = budget.cost_policy(now)
+                    policy = GlobalAICostLimit(
+                        cost_limit_enabled=(
+                            args.cost_limit_enabled
+                            if args.cost_limit_enabled is not None
+                            else current["cost_limit_enabled"]
+                        ),
+                        max_observed_cost_usd_per_day=(
+                            args.daily_limit_usd
+                            if args.daily_limit_usd is not None
+                            else current["max_observed_cost_usd_per_day"]
+                        ),
+                    )
+                    output = budget.set_cost_limit(policy, now, "local-cli")
+                else:
+                    output = (
+                        budget.session_status(now, args.run_id, record["config"]["ai"])
+                        if record
+                        else budget.status(now)
+                        if args.legacy_global
+                        else budget.aggregate_status(now)
+                    )
+            finally:
+                budget.close()
+        elif args.command == "observe":
             from poc.adapters.inbound.observe import observe
 
             output = asyncio.run(
@@ -181,19 +290,70 @@ def main(argv: list[str] | None = None) -> int:
                 auth.close()
         elif args.command == "config-check":
             output = {"valid": True, "mode": config.app.mode, "config_hash": config.hash}
-        elif args.command == "profiles":
-            output = {
-                "profiles": [
-                    {
-                        "profile_id": "trend_15m_v1",
-                        "version": "1",
-                        "status": "PAPER_CORE",
-                        "continuous_engine_available": True,
-                        "template": config.model_dump(mode="json"),
-                        "parameter_schema": type(config).model_json_schema(),
+        elif args.command.startswith("profile-") or args.command == "profiles":
+            import yaml
+
+            from poc.adapters.outbound.control_store import ControlStore
+            from poc.adapters.outbound.profiles import SQLiteProfiles
+            from poc.application.profiles import ProfileService
+            from poc.profile_config import profile_template
+
+            commands = ControlStore(Path(config.app.data_dir) / "control" / "control.sqlite3")
+            try:
+                service = ProfileService(SQLiteProfiles(commands.connection), config)
+                if args.command == "profile-template":
+                    style = {"daytrade": "DAY_TRADE", "swing": "SWING", "scalping": "SCALPING"}[
+                        args.style
+                    ]
+                    document = profile_template(style)
+                    destination = Path(args.output)
+                    with destination.open("x", encoding="utf-8") as stream:
+                        yaml.safe_dump(document, stream, sort_keys=False, allow_unicode=True)
+                    output = {"path": str(destination), "style": style, "starts_engine": False}
+                elif args.command in ("profile-validate", "profile-register"):
+                    text = Path(args.input).read_bytes()
+                    if len(text) > 128 * 1024:
+                        raise DomainError("Profile exceeds 128 KiB")
+                    if any(
+                        isinstance(
+                            token,
+                            (yaml.tokens.AliasToken, yaml.tokens.AnchorToken, yaml.tokens.TagToken),
+                        )
+                        for token in yaml.scan(text)
+                    ):
+                        raise DomainError("Profile YAML cannot contain aliases, anchors or tags")
+                    document = yaml.safe_load(text)
+                    output = (
+                        service.validate(document)
+                        if args.command == "profile-validate"
+                        else {"profile": service.register(document, "local-cli", datetime.now(UTC))}
+                    )
+                elif args.command in ("profile-publish", "profile-archive"):
+                    output = {
+                        "profile": service.transition(
+                            args.profile,
+                            args.version,
+                            "publish" if args.command == "profile-publish" else "archive",
+                            "local-cli",
+                            datetime.now(UTC),
+                        )
                     }
-                ]
-            }
+                else:
+                    output = {
+                        "profiles": [
+                            {
+                                "profile_id": "trend_15m_v1",
+                                "version": "1",
+                                "status": "PAPER_CORE",
+                                "continuous_engine_available": True,
+                                "template": config.model_dump(mode="json"),
+                                "parameter_schema": type(config).model_json_schema(),
+                            }
+                        ]
+                    }
+                    output["profiles"].extend(service.repository.list_profiles())
+            finally:
+                commands.close()
         elif args.command == "smoke-offline":
             if args.scope == "accounting":
                 output = smoke_offline(config, session_manager(config))
@@ -205,6 +365,10 @@ def main(argv: list[str] | None = None) -> int:
             from poc.adapters.inbound.ai_smoke import smoke_openrouter
 
             output = asyncio.run(smoke_openrouter(config))
+        elif args.command == "check-openrouter":
+            from poc.adapters.inbound.ai_smoke import check_openrouter
+
+            output = asyncio.run(check_openrouter(config, args.recover_auth))
         elif args.command in ("init-db", "prepare-session"):
             output = asyncio.run(prepare(args, config))
         elif args.command == "run":
@@ -278,14 +442,14 @@ def main(argv: list[str] | None = None) -> int:
                         output = datasets.export(Path(args.output), datetime.now(UTC))
                 elif args.command == "evaluate-outcomes":
                     from poc.application.learning import LearningEngine
-                    from poc.config import Config
+                    from poc.config import parse_config
                     from poc.domain.models import MarketMetadata
                     from poc.domain.primitives import utc
 
                     metadata = record["market_metadata"].copy()
                     metadata["observed_at"] = utc(metadata["observed_at"])
                     learning = LearningEngine(
-                        Config.model_validate(record["config"]), MarketMetadata(**metadata), db
+                        parse_config(record["config"]), MarketMetadata(**metadata), db
                     )
                     output = {
                         "matured_or_unavailable": learning.mature(datetime.now(UTC)),
@@ -300,6 +464,8 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 db.close()
         print(canonical_json(output))
+        if args.command == "check-openrouter" and not output["authenticated"]:
+            return 2
         if args.command == "smoke-openrouter" and (
             output.get("error_code") or output.get("validation") == "INVALID_AI_RESPONSE"
         ):

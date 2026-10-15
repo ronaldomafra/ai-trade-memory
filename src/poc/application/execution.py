@@ -4,8 +4,10 @@ from datetime import datetime
 from poc.application.ports import SessionStore
 from poc.config import Config
 from poc.domain.broker import PaperBroker
+from poc.domain.execution_quality import quality_reason
 from poc.domain.models import Action, Fill, MarketMetadata, Quote, Wallet
 from poc.domain.primitives import DomainError, stable_id, utc
+from poc.domain.profiles import entry_window_open, parameters
 from poc.domain.risk import evaluate_risk
 
 
@@ -23,6 +25,8 @@ class TradeIntent:
     entries_allowed: bool = True
     hold_reason: str | None = None
     proposed_action: Action | None = None
+    entry_reference_quote: Quote | None = None
+    forced_exit_reason: str | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -81,6 +85,13 @@ class TradingService:
                 self.config.strategy,
                 self.config.app.max_quote_age_seconds,
             )
+            if intent.forced_exit_reason and wallet.has_position and not risk.exit_reason:
+                risk = replace(
+                    risk,
+                    state=replace(risk.state, pending_exit_reason=intent.forced_exit_reason),
+                    exit_reason=intent.forced_exit_reason,
+                    block_buy=True,
+                )
             unit.save_risk(risk.state)
             for kind in risk.events:
                 unit.event(
@@ -184,4 +195,32 @@ class TradingService:
                 return "DAILY_RISK_BLOCKED"
             if wallet.last_exit_cycle_id == intent.cycle_id:
                 return "CLOSED_IN_SAME_CYCLE"
+            p = parameters(self.config)
+            if p:
+                if not entry_window_open(self.config, now):
+                    return "ENTRY_WINDOW_CLOSED"
+                if any(
+                    (
+                        self.store.latest_risk(w.portfolio_id)
+                        and self.store.latest_risk(w.portfolio_id).pending_exit_reason
+                    )
+                    for w in self.store.wallets()
+                ):
+                    return "SESSION_EXIT_PENDING"
+                if wallet.entry_at is not None:
+                    return "ALREADY_IN_POSITION"
+                previous_exit = self.store.last_exit_at(wallet.portfolio_id)
+                from poc.domain.profiles import seconds
+
+                if previous_exit and (
+                    now - previous_exit
+                ).total_seconds() < p.strategy.reentry_cooldown_candles * seconds(self.config):
+                    return "REENTRY_COOLDOWN"
+                if intent.entry_reference_quote is None:
+                    return "ENTRY_REFERENCE_UNAVAILABLE"
+                reason = quality_reason(
+                    self.config, wallet, self.metadata, quote, now, intent.entry_reference_quote
+                )
+                if reason:
+                    return reason
         return "APPROVED"

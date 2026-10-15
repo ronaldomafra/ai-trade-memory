@@ -58,3 +58,94 @@ def test_observer_ages_quote_after_snapshot_read_without_hiding_genuine_future(
     assert sample["quote_age_seconds"] == 0.005 and sample["feed_healthy"]
     future = sample_session(SessionViews(cfg), "run-1", NOW)
     assert future["quote_age_seconds"] == -0.025 and not future["feed_healthy"]
+
+
+def test_observer_records_factor_coverage_without_inventing_availability_or_writing(
+    tmp_path, monkeypatch
+):
+    import poc.adapters.inbound.observe as module
+
+    cfg, _, db, _ = setup(tmp_path)
+    db.close()
+    exporter = module.FileExporter.dashboard
+
+    def dashboard(self):
+        snap = exporter(self)
+        snap["fixture"] = False
+        snap["external_context"] = {
+            "news": {
+                "status": "available",
+                "coverage": "PARTIAL",
+                "items": [{"factor_id": "synthetic-news"}],
+            },
+            "prediction_markets": {
+                "status": "unavailable",
+                "coverage": "PARTIAL",
+                "items": [],
+                "pending": [{"reason": "INSUFFICIENT_DEPTH"}],
+                "discovery": {"scope": {"coverage": "ASSET_TAG_ONLY"}},
+            },
+        }
+        return snap
+
+    monkeypatch.setattr(module.FileExporter, "dashboard", dashboard)
+    p = tmp_path / "sessions" / "run-1" / "poc.sqlite3"
+    before = hashlib.sha256(p.read_bytes()).hexdigest()
+    sample = sample_session(SessionViews(cfg), "run-1", NOW)
+    assert sample["external_coverage"]["news"]["factor_ids"] == ["synthetic-news"]
+    poly = sample["external_coverage"]["prediction_markets"]
+    assert poly["usable_factor_count"] == 0 and poly["pending_count"] == 1
+    assert poly["status"] == "unavailable" and poly["scope"]["coverage"] == "ASSET_TAG_ONLY"
+    assert hashlib.sha256(p.read_bytes()).hexdigest() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gap", "reason"),
+    [(timedelta(hours=25), "SAMPLING_GAP"), (timedelta(minutes=-5), "CLOCK_MOVED_BACKWARD")],
+)
+async def test_observer_interrupts_on_suspend_or_clock_jump_without_claiming_24h(
+    tmp_path, monkeypatch, gap, reason
+):
+    import json
+
+    import poc.adapters.inbound.observe as module
+
+    cfg, _, db, _ = setup(tmp_path)
+    db.close()
+    path = tmp_path / "sessions" / "run-1" / "poc.sqlite3"
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    moments = iter([NOW, NOW, NOW + gap])
+
+    class WallClock:
+        @staticmethod
+        def now(tz):
+            return next(moments)
+
+    class ReadOnlyRuntime:
+        def __init__(self, *args):
+            pass
+
+        async def inspect(self, run_id):
+            return {"running": True, "status": "running"}
+
+    async def next_frame(awaitable, timeout):
+        awaitable.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(module, "datetime", WallClock)
+    monkeypatch.setattr(module, "DockerRuntime", ReadOnlyRuntime)
+    monkeypatch.setattr(module.asyncio, "wait_for", next_frame)
+    # Valid operational samples confined to this test; production rejects fixtures.
+    monkeypatch.setattr(
+        module, "sample_session", lambda *args: {"invariants_ok": True, "feed_healthy": True}
+    )
+    result = await observe(cfg, ["run-1"], tmp_path / "observation", 24, 60)
+    assert result["state"] == "INTERRUPTED"
+    assert result["sample_frames"] == 2
+    assert result["interruption"]["reason"] == reason
+    assert result["interruption"]["gap_seconds"] == gap.total_seconds()
+    assert result["elapsed_seconds"] == max(0, gap.total_seconds())
+    stored = json.loads((tmp_path / "observation" / "observation.json").read_text())
+    assert stored["state"] == "INTERRUPTED"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before

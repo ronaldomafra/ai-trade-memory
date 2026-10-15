@@ -88,7 +88,9 @@ class LearningCatalog:
                     core["decision_at"],
                     canonical_json(core),
                     canonical_json(normalized),
-                    "relative_features_v1",
+                    "profile_relative_features_v2"
+                    if core["label_version"] == "profile_labels_v2"
+                    else "relative_features_v1",
                 ),
             )
             old_origin = self.connection.execute(
@@ -112,11 +114,11 @@ class LearningCatalog:
         records = []
         for row in self.connection.execute(
             "SELECT * FROM examples WHERE symbol!=? AND protocol_hash=? "
-            "AND normalizer_version=? AND decision_at>=? AND decision_at<? ORDER BY sample_id",
+            "AND normalizer_version IN ('relative_features_v1','profile_relative_features_v2') "
+            "AND decision_at>=? AND decision_at<? ORDER BY sample_id",
             (
                 target_symbol,
                 protocol_hash,
-                "relative_features_v1",
                 iso(utc(cutoff) - timedelta(days=60)),
                 iso(cutoff),
             ),

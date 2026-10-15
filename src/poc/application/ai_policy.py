@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from poc.config import Config
 from poc.domain.factors import entry_foundation
-from poc.domain.jev import parse_trade_response, trade_payload
+from poc.domain.jev import compact_trade_state, parse_trade_response, trade_payload
 from poc.domain.models import Action, Proposal
 from poc.domain.primitives import stable_id
 
@@ -32,6 +32,7 @@ class JEVPolicy:
             state = {**state}
             if state.get("historical_feedback", {}).get("status") not in ("ready", "available"):
                 state["historical_feedback"] = {"status": "disabled"}
+            state = compact_trade_state(state)
             grouped.setdefault(stable_id(state), []).append((portfolio, state))
 
         async def infer(fingerprint, members):

@@ -107,9 +107,57 @@ ordem ou reset. Logout, fechar gateway e perder rede não param os motores.
 
 Testes de permissões/auth/refresh/replay/cutoff/backpressure e API/TUI no projeto.
 Ensaios locais reais em [validação E08/E09](relatorios/VALIDACAO_E08_E09.md).
-Domínio público/certificado/hospedagem externa e estabilidade 24h são E11.
+Domínio público/certificado/hospedagem externa e avaliação de estabilidade são E11;
+período de amostragem escolhido pelo usuário, sem mínimo obrigatório de 24h (D054).
 
 Documentação primária usada: [FastAPI WebSocket](https://fastapi.tiangolo.com/advanced/websockets/),
 [Uvicorn](https://www.uvicorn.org/settings/),
 [Argon2](https://argon2-cffi.readthedocs.io/en/stable/howto.html),
 [PyOTP](https://pyauth.github.io/pyotp/).
+
+
+## Extensão D057 — catálogo de perfis
+
+`GET /v1/profile-template?style=DAY_TRADE|SWING|SCALPING` devolve definição completa,
+schema e famílias suportadas. `POST /v1/profiles/validate` recebe a definição e
+retorna preview sem inferência ou criação de sessão. `GET /v1/profiles` conserva
+o legado e acrescenta versões cadastradas, com estado, hash, definição e template.
+
+`POST /v1/profiles` ou `POST /v1/profiles/{id}/versions` cadastra DRAFT;
+`POST /v1/profiles/{id}/versions/{version}/publish` publica;
+`POST /v1/profiles/{id}/versions/{version}/archive` arquiva.
+`GET /v1/profiles/{id}/versions/{version}` consulta uma revisão.
+Mutações exigem proprietário com manage global e Idempotency-Key. Estado do
+catálogo é autoridade; um campo de estado no documento não se autopublica.
+ID/revisão com conteúdo diferente é recusado, inclusive em DRAFT; criar revisão.
+
+Criação de sessão aceita `profile_id` genérico, `profile_version` opcional e
+`profile_hash` opcional, além dos campos existentes. Resolver versão publicada
+uma vez e fixar a resolução persistida antes de metadados; retry do mesmo comando
+não escolhe nova revisão. Overrides pertencem aos parâmetros, não a endpoints,
+segredos ou storage. D059 permite limites de IA por sessão nos parâmetros `ai`.
+`configuration` devolve parâmetros V2
+completos e identidade/hash da revisão. Restore usa snapshot local imutável.
+Guia e exemplos completos em [GUIA_PERFIS_BOTS.md](GUIA_PERFIS_BOTS.md).
+
+## D059 — orçamento do bot
+
+`parameters.ai` aceita `budget_scope: SESSION`, `max_calls_per_day` inteiro positivo,
+`cost_limit_enabled` booleano e `max_observed_cost_usd_per_day` Decimal positivo
+em texto. Esses campos entram no perfil e em overrides de criação, preservando
+valores efetivos/hash na sessão. Não há teto global de 240/US$ 0,05 para SESSION.
+Contagem de chamadas físicas por run_id/dia UTC, incluindo classificação/retry.
+
+- `GET /v1/sessions/{run_id}/ai-budget`: token com read da sessão; uso/limites
+  próprios, status das travas e identidade do perfil. Consulta não faz inferência.
+- `GET /v1/ai-budget`: read global; scope `ALL_SESSIONS_REPORT`, totais,
+  bots já vinculados ao orçamento operacional e seção `legacy` identificada.
+- `PUT /v1/ai-budget`: manage global, retorna 409 com orientação de configurar
+  o perfil/criação; não altera políticas nem motores.
+- `PUT /v1/legacy-ai-budget`: somente para contratos antigos, manage global e
+  campos D053 completos; não afeta SESSION.
+
+Perfis antigos publicados continuam imutáveis. Ao preparar uma nova sessão
+cadastrável, o controle promove a cópia efetiva para SESSION e registra os ajustes;
+restaurar sessões existentes não aplica a promoção. Cache semântico bem-sucedido
+continua compartilhável; recusa pelo orçamento de um bot não veta outro pagador.

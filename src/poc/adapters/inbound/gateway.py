@@ -10,6 +10,7 @@ from poc.adapters.inbound.control_api import gateway_api
 from poc.adapters.outbound.auth import AuthStore
 from poc.adapters.outbound.control_store import ControlStore
 from poc.adapters.outbound.market import BinancePublic
+from poc.adapters.outbound.profiles import SQLiteProfiles
 from poc.adapters.outbound.runtime import DockerRuntime
 from poc.adapters.outbound.session_view import SessionViews
 from poc.adapters.outbound.sqlite import SQLiteStorage
@@ -27,7 +28,15 @@ async def serve_control(config: Config, host: str = "127.0.0.1", port: int = 808
     clock = SystemClock()
     host_root = os.environ.get("POC_HOST_DATA_DIR")
     runtime = DockerRuntime(root, host_data_root=Path(host_root) if host_root else None)
-    service = ControlService(config, SQLiteStorage(), source, clock, runtime, commands)
+    service = ControlService(
+        config,
+        SQLiteStorage(),
+        source,
+        clock,
+        runtime,
+        commands,
+        SQLiteProfiles(commands.connection),
+    )
     app = gateway_api(service, auth, commands, SessionViews(config), clock, http)
     try:
         await uvicorn.Server(

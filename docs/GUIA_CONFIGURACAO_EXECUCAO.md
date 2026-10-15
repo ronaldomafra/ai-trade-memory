@@ -1,3 +1,8 @@
+> **Atualização D057:** para cadastrar perfis e criar bots parametrizados pela
+> TUI, consultar [GUIA_PERFIS_BOTS.md](GUIA_PERFIS_BOTS.md). Templates já são
+> executáveis após cadastro/publicação. A sessão ETH foi parada pelo usuário;
+> nenhuma sessão nova é iniciada por esta atualização.
+
 # Guia de configuração e execução
 
 Aplicação 0.1.0 · SPEC 1.50 · Atualizado em 12/10/2026.
@@ -87,15 +92,34 @@ POC_CONTROL_PORT=18080
 | `POC_UID`, `POC_GID`, `DOCKER_GID` | Identidades/permissão do container de controle, definidas nos exports. |
 | `POC_PUBLIC_HOST` | Nome DNS próprio, necessário apenas no fluxo remoto com TLS. |
 
-As quatro primeiras variáveis funcionais são lidas do `.env` na partida dos comandos
-do servidor. Variáveis já exportadas no shell têm precedência. Compose também lê
-o `.env`. A TUI não carrega as chaves dos provedores; autentica com usuário/senha/2FA.
+As credenciais de provedores são lidas do `.env` na partida dos comandos e têm
+precedência sobre valores antigos exportados no shell. Sem arquivo, os valores
+de ambiente continuam disponíveis. `POC_DATA_DIR` conserva precedência do ambiente
+para permitir volumes Docker/restauração isolada. `POC_ENV_FILE` pode indicar outro
+arquivo explicitamente; arquivo indicado ausente é erro, sem fallback silencioso.
+Compose monta `.env` somente leitura em `/run/poc/credentials.env` e o servidor
+carrega as credenciais desse arquivo. A TUI autentica com usuário/senha/2FA.
 
 Ao trocar credenciais, reinicie processos nativos e recrie containers com os mesmos
 volumes, conforme **Atualizar código ou credenciais**. Um `docker restart` mantém
 as variáveis antigas do container. Não coloque segredos em YAML, datasets ou logs.
 
 ### Verificar o JEV
+
+Confira a autenticação sem gerar inferência:
+
+```bash
+unset OPENROUTER_API_KEY
+uv run python -m poc check-openrouter --recover-auth
+```
+
+O CLI carrega a chave do `.env`. `unset` é opcional com o carregamento corrigido.
+Esperado: `authenticated: true`, HTTP 200 e
+`circuit_open: false`. GET oficial `/api/v1/key` consulta a chave; a resposta não
+é exibida nem persistida com dados privados. `--recover-auth` remove apenas um
+401 antigo da mesma credencial após verificação bem-sucedida; não apaga tentativas,
+orçamento ou bloqueios 402/403. A consulta não comprova inferência JEV:
+[contrato oficial](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key).
 
 Após configurar uma chave válida, o diagnóstico abaixo pode enviar **uma tentativa
 física**, sujeito ao circuito e orçamento. Não opera carteiras; pode ser cobrado:
@@ -108,8 +132,9 @@ Modelo/endpoint são fixos: `typesafe/jev-1.13` e
 `POST https://openrouter.ai/api/alpha/decisions`. Não configure Chat Completions.
 Confira `error_code`, `validation`, modelo efetivo, ID e custo retornados.
 HTTP 401/402/403 abre circuito persistido da credencial; trocar uma chave inválida
-é diferente de apagar o circuito/orçamento. O ensaio anterior respondeu 401;
-uma resposta autenticada válida continua pendente.
+é diferente de apagar o circuito/orçamento. Em 13/10/2026, nova credencial retornou
+HTTP 200 na consulta e uma resposta Decisions válida do JEV com `usage.cost`;
+isso não equivale ao aceite de execução prolongada da sessão.
 
 ## Escolher a pré-configuração da sessão
 
@@ -129,7 +154,7 @@ Revise antes de criar a sessão, pois a retomada preserva a configuração aceit
 | `polymarket.prices_poll_minutes` / `markets_poll_minutes` | `5` para preços/livros / `60` para descoberta/metadados. |
 | `learning.initial_dataset_path` | `null` no YAML para iniciar sem dataset; na TUI, campo de arquivo opcional. |
 | `learning.transfer.enabled` | `true`, condicionado aos gates de validação. |
-| `ai.max_calls_per_day` / `max_observed_cost_usd_per_day` | `240` / `"0.05"`, limites globais. |
+| `ai.max_calls_per_day` / `max_observed_cost_usd_per_day` | `240` / `"0.05"`, fallback legado; política financeira global explícita D053 prevalece. |
 
 Os números de risco são parâmetros experimentais. Capital de 100 USDT por carteira,
 modo paper, fonte pública e intervalos do perfil permanecem fixos. Campos desconhecidos
@@ -198,10 +223,41 @@ uv run python -m poc tui --server http://127.0.0.1:18080
 7. Confira `learning.transfer.enabled` na pré-configuração e selecione
    **Criar e iniciar**.
 
+Para colar o código TOTP da área de transferência do computador, use **Colar código**
+na etapa 2FA ou clique no campo e use `Ctrl+Shift+V` do terminal.
+O botão lê a área local somente ao ser acionado, usando Tk quando disponível no
+computador da TUI; em SSH/ambiente sem desktop ou Tk, use a colagem do terminal.
+Espaços/quebras de linha são removidos, preservando
+os seis dígitos e zeros iniciais. Colar um código completo substitui a tentativa
+anterior. O `Ctrl+V` do Textual usa sua área de transferência interna; o atalho
+do terminal recebe a colagem externa. Senha/TOTP continuam ocultos e são apagados
+da interface após envio. A tela informa **Código recebido: 6/6 números** sem
+exibir o código. Campo vazio/incompleto não é enviado ao servidor. O desafio
+2FA vence em dois minutos; nesse caso, a tela volta à entrada de senha e informa
+a expiração. Entre novamente e use um código atual do autenticador.
+
 O servidor consulta metadados públicos do par, prepara o banco, aceita o dataset
 opcional e inicia seu container. Aguarde o aquecimento dos indicadores/candles.
 Veja identidade, frescor, relógio, estados das fontes e motivos de HOLD no dashboard;
 saldo inicial e ausência de trades não representam falha por si sós.
+
+O Dashboard mostra o gráfico no topo em largura total, seguido de Carteiras e
+Patrimônio A/B/C lado a lado (empilhados em terminal estreito), e as decisões do ciclo
+selecionado. Use **Acompanhar último ciclo** para seguir automaticamente ou
+selecione uma avaliação no controle/clique nas faixas Ciclos e A/B/C do gráfico.
+● marca avaliação, ▲ compra e ▼ venda simuladas confirmadas; ◆ indica operações
+coincidentes. Os indicadores pertencem à decisão selecionada. Notícias e
+Polymarket mostram os últimos registros recebidos, com datas e aviso quando
+anteriores/vencidos, independentemente da seleção histórica.
+
+Para carregar a atualização visual no checkout, saia com `Q` e reabra:
+
+```bash
+uv run python -m poc tui --server http://127.0.0.1:18080
+```
+
+Entre normalmente com usuário/senha/2FA. Nenhuma recriação Docker, nova sessão
+ou limpeza de banco é necessária; o motor e a observação de 24h continuam.
 
 Selecione uma sessão existente e use **Retomar** ou `S` para iniciar seu motor
 parado preservando banco/configuração/carteiras/histórico. Sessão nova cria outro
@@ -223,7 +279,74 @@ No login, modo somente leitura permite acompanhar sessões e impede comandos de
 gestão. Tokens ficam na memória da TUI e são renovados pela API. **Sair da TUI,
 fazer logout ou parar o controle não para os motores Docker.**
 
+## Orçamento JEV por perfil e bot — D059
+
+Nos perfis cadastráveis, configure os limites na seção `ai` do perfil ou da
+pré-configuração de **Nova**, antes de iniciar a sessão:
+
+```json
+"budget_scope": "SESSION",
+"max_calls_per_day": 1000,
+"cost_limit_enabled": true,
+"max_observed_cost_usd_per_day": "0.50"
+```
+
+Exemplo de configuração, sem aplicação automática. Preserve os demais campos
+de `ai`; dinheiro é texto Decimal e chamadas são inteiro positivo. O perfil
+fornece os padrões; cada bot/sessão recebe uma cópia imutável, com orçamento e
+contagem próprios por dia UTC. Para novos bots, 240/US$ 0,05 são defaults
+editáveis, não tetos globais. Desativar custo não desativa a guarda de chamadas.
+
+```bash
+# Relatório agregado, sem limite compartilhado para os novos bots:
+uv run python -m poc ai-budget
+# Contadores e limites da sessão escolhida:
+uv run python -m poc ai-budget --run-id zec-scalp-01
+```
+
+Chamadas de decisões, classificação e retries entram no orçamento do bot pagador;
+cache/B-C compartilhado não duplicam despesa. Custo em USD é separado do PnL
+paper em USDT; custo desconhecido continua explícito. Reinício não zera consumo,
+e o teto observado não garante teto absoluto de fatura com chamadas em voo.
+
+API: GET `/v1/ai-budget` exige read global e mostra totais; GET
+`/v1/sessions/{run_id}/ai-budget` exige read da sessão. PUT global retorna 409;
+configure os parâmetros antes da partida. [Guia dos perfis](GUIA_PERFIS_BOTS.md).
+
+**Compatibilidade de sessões antigas:** snapshots sem SESSION restauram o
+contrato anterior. Somente nesses casos, a configuração operacional antiga pode
+ser consultada/alterada explicitamente com `ai-budget --legacy-global` e flags
+`--enable-cost-limit`, `--disable-cost-limit`, `--daily-limit-usd`; ou PUT
+`/v1/legacy-ai-budget` com manage global/2FA. Isso não governa os novos bots.
+Nenhum ajuste reescreve despesas, hashes ou carteiras existentes.
+
+## Classificações de notícias — otimização D055 preparada
+
+A nova versão reaproveita a interpretação de cada artigo separadamente da
+comparação de conflitos. Não é preciso adicionar chave nem parâmetro: os caches
+versionados usam o mesmo SQLite de fontes e o orçamento global existente.
+Serviços ainda não foram atualizados para essa versão.
+
+Após implantação, trocar uma notícia de um conjunto de cinco demanda uma
+interpretação nova e uma comparação compartilhada; não exige cinco interpretações
+completas. A primeira carga pode gerar seis chamadas, porque os registros legados
+com pares permanecem no histórico e não são tratados como semanticamente idênticos
+ao novo contrato. Reordenar ou consultar as mesmas evidências reutiliza o cache.
+
+Falha de comparação aparece como conflito indeterminado/cobertura parcial; não
+usar a indicação de ausência de conflito de um conjunto antigo. Uma nova janela
+de coleta permite recuperar processamento falho com orçamento e retries ativos.
+As duas etapas contam em `context_classification`; recibos e disponibilidade são
+persistidos sem duplicar custo em B/C. A análise posterior deve distinguir versões
+e medir chamadas/custo, sem esperar duração mínima de 24h (D054).
+
 ## Criar e operar sessões pela CLI
+
+O catálogo implementado continua limitado a `trend_15m_v1`. O
+[plano D056](PLANO_PERFIS_ESTRATEGIA.md) prepara cadastro e presets de swing,
+scalping e day trade para depois da revisão do core. Os arquivos em
+docs/templates/perfis **não são configs executáveis pelo CLI atual**; não usar
+esses documentos em `--config` nem supor que mudar o nome habilita uma estratégia.
 
 Alternativa ao wizard, usando os mesmos dados do servidor. Não precisa executar
 novamente se essas sessões já foram criadas pela TUI:
@@ -378,7 +501,8 @@ uv run python -m poc export-events --run-id btc-01 --rebuild
 | `AI_CIRCUIT_OPEN` / 401 | Corrija a credencial local e recrie/reinicie os processos; preserve orçamento/auditoria. |
 | `AI_BUDGET_EXCEEDED` | Limite global atingido; registre cobertura e aguarde o próximo dia UTC. |
 | `MARKETAUX_TOKEN_NOT_CONFIGURED` | Preencha o token local quando disponível; RSS continua com sua cobertura própria. |
-| `GAMMA_METRIC_UNITS_UNVERIFIED` | Filtro conservador atual; reduzir o piso não valida a unidade dos dados. |
+| `GAMMA_METRIC_UNITS_UNVERIFIED` | Campos monetários ausentes ou fora do contrato Gamma v1 verificado; reduzir o piso não valida a unidade. |
+| `CANDLE_VOLUME_REVISION_IGNORED` | Binance retornou outro volume com OHLC/janela iguais. O registro original é preservado e a revisão fica auditada; não gera nova decisão. Conflitos de preços continuam rejeitados. |
 | Memória/transferência insuficiente | Aguarde exemplos maduros e validação; não force ativação. |
 | Importação recusada | Confira primeira decisão, schema/hash, cutoff, compatibilidade e tamanho máximo de 64 MiB. |
 | Imagem mudou e start foi recusado | Recrie o container parado preservando volumes, conforme seção de atualização. |
@@ -443,6 +567,33 @@ uv run python -m poc validate-data --run-id btc-01
 O próximo start recria o container com a imagem local e variáveis atuais. Execute
 os comandos no servidor com a configuração local atual; não remova os diretórios
 de dados nem os bancos de orçamento/cache para contornar falhas.
+
+Para aplicar a correção de contexto na sessão dinâmica `eth-01`, as imagens
+foram construídas em 13/10/2026. Feche a TUI e execute na raiz do checkout:
+
+```bash
+unset OPENROUTER_API_KEY
+uv run python -m poc backup --run-id eth-01 --output data/backups/eth-01-before-context-fix
+uv run python -m poc stop-engine --run-id eth-01
+docker rm poc-engine-eth-01-966c891ca379
+uv run python -m poc start-engine --run-id eth-01
+uv run python -m poc validate-data --run-id eth-01
+export POC_UID="$(id -u)"
+export POC_GID="$(id -g)"
+export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+export POC_HOST_DATA_DIR="$PWD/data"
+export POC_CONTROL_PORT=18080
+docker compose --profile control up -d --no-build --force-recreate control_api
+uv run python -m poc tui --server http://127.0.0.1:18080
+```
+
+O backup exige destino novo; se já existir, escolha outro nome. `docker rm` sem
+`-f` recusa um motor ainda ativo. Nenhum banco ou diretório é removido. Retomada
+usa a configuração/carteiras/histórico persistidos e ignora candles antigos para
+negociação. As próximas chamadas de classificação/coleta e decisões por candle
+fechado aparecem no dashboard; `unavailable` continua possível quando faltarem
+fatores elegíveis. Polymarket não tem seus filtros de qualidade/unidades liberados
+por essa correção.
 
 Serviços fixos usam o próprio Compose para recriação:
 
@@ -522,14 +673,16 @@ os motores Docker; systemd nativo é alternativa operacional com configuração 
 
 ## Observar a execução e entender os limites atuais
 
-O orçamento JEV é global: até 240 tentativas e US$ 0,05 de custo observado por dia
-UTC, incluindo classificação/retries e todas as sessões. Duas sessões não dobram
-o orçamento. Custo ausente fica desconhecido; esse teto observado não garante uma
+O orçamento JEV é global: até 240 tentativas por dia UTC e, por default, US$ 0,05
+de custo observado/dia, incluindo classificação/retries e todas as sessões. D053
+prepara limite financeiro configurável/opcional, ainda não aplicado ao ensaio.
+Duas sessões não dobram o orçamento. Custo ausente fica desconhecido; esse teto observado não garante uma
 fatura máxima quando o provedor não informa cobrança. Marketaux tem quota compartilhada
 de até 100 requisições diárias no contrato gratuito implementado.
 
 Para coletar evidência periódica sem parar motores ou enviar inferências, use
-uma pasta nova e mantenha o processo do observador ativo:
+uma pasta nova e mantenha o processo do observador ativo. A duração é escolhida
+pelo usuário (D054); 24h no exemplo é opcional, sem bloquear análises ou atualizações:
 
 ```bash
 uv run python -m poc observe --run-id btc-01 --run-id eth-01 \
@@ -539,6 +692,21 @@ uv run python -m poc observe --run-id btc-01 --run-id eth-01 \
 `observation.json` acompanha progresso e `samples.jsonl` registra saúde/auditoria.
 Parar esse observador não para os motores. `COMPLETED` indica tempo decorrido;
 revise degradações, fontes, custos e invariantes antes do aceite.
+
+**Observador da ETH registrado em 14/10/2026:** iniciado às 08:28:50 de Brasília,
+com prazo configurado para 15/10 no mesmo horário e amostras a cada minuto,
+independentemente da TUI. Esse prazo não é requisito de aceite nem impede analisar
+ou atualizar antes; não é necessário reiniciar a contagem após atualização (D054).
+Artefatos em `data/acceptance/eth-24h-20261014T112850Z`; consulte
+`observation.json` para progresso e `samples.jsonl` para cobertura/fatores,
+saúde e invariantes. Não reinicie outro observador nesse mesmo destino.
+Mantenha máquina e Docker ativos. O ensaio anterior foi interrompido pela suspensão
+do host; os artefatos foram preservados. O novo usa systemd-inhibit sleep:idle block
+temporário durante a observação, sem alterar configurações permanentes. Lacuna
+acima de max(120s, duas cadências) ou relógio retrocedendo resulta em INTERRUPTED,
+sem parar o bot ou apresentar uma lacuna como observação contínua. Notícias e Polymarket disponíveis na
+partida; [histórico de integração](relatorios/VALIDACAO_POLYMARKET_20261013.md) e
+[status atual](STATUS_DESENVOLVIMENTO.md).
 
 Na revisão de 12/10/2026: 191 testes passaram; aceite de 24h ainda em andamento,
 JEV autenticado respondeu 401, Marketaux aguarda token local e unidades Gamma

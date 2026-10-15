@@ -1,6 +1,7 @@
 """Public, GET-only Gamma/CLOB/Data adapters. No trading SDK or wallet credentials."""
 
 import json
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -9,6 +10,7 @@ import httpx
 from poc.adapters.outbound.source_cache import SourceCache
 from poc.application.ports import Clock
 from poc.config import Polymarket
+from poc.domain.external import ALIASES
 from poc.domain.prediction import normalize_book, normalize_market
 from poc.domain.primitives import DomainError, decimal, iso, stable_id
 
@@ -39,7 +41,10 @@ class PolymarketPublic:
             await self.client.aclose()
 
     async def get(self, base: str, path: str, params: dict) -> dict | list:
-        if (base, path) not in PUBLIC_PATHS:
+        if (base, path) not in PUBLIC_PATHS and not (
+            base == "https://gamma-api.polymarket.com"
+            and re.fullmatch(r"/tags/slug/[a-z0-9-]{1,64}", path)
+        ):
             raise DomainError("Only allowlisted public prediction-market reads are permitted")
         response = await self.client.get(base + path, params=params)
         if response.status_code != 200:
@@ -48,29 +53,96 @@ class PolymarketPublic:
             raise DomainError("Prediction-market response exceeds 4 MB")
         return json.loads(response.content, parse_float=Decimal)
 
-    async def discover(self, base_asset: str) -> dict:
-        markets = []
-        complete = False
-        attempted = 0
-        rejected = 0
-        reasons = []
-        observations = []
-        seen = set()
-        for page in range(self.config.discovery_max_requests_per_refresh):
-            scope = {
-                "coverage": "ALL_ACTIVE_MARKETS",
-                "policy": "gamma_active_association_v2",
-                "page": page,
-                "page_size": self.config.discovery_page_size,
+    async def _tag(self, slug: str) -> tuple[dict, bool]:
+        scope = {"policy": "gamma_asset_tags_v3", "slug": slug}
+        slot = self.cache.reserve(
+            "poly_tag", scope, self.clock.now(), self.config.markets_poll_minutes * 60
+        )
+        if not slot["granted"]:
+            return slot.get("cached") or {"status": "UNAVAILABLE"}, False
+        try:
+            raw = await self.get("https://gamma-api.polymarket.com", "/tags/slug/" + slug, {})
+            if (
+                not isinstance(raw, dict)
+                or raw.get("slug") != slug
+                or not str(raw.get("id", "")).isdecimal()
+            ):
+                raise DomainError("Invalid public asset tag identity")
+            result = {
+                "status": "COMPLETE",
+                "id": str(raw["id"]),
+                "slug": slug,
+                "label": str(raw.get("label", slug)),
+                "observed_at": iso(self.clock.now()),
             }
-            reserved = self.cache.reserve(
+        except Exception as error:
+            result = {"status": "UNAVAILABLE", "reason": type(error).__name__}
+        self.cache.finish(slot["request_id"], result, self.clock.now())
+        return result, True
+
+    async def discover(self, base_asset: str) -> dict:
+        markets, reasons, observations = [], [], []
+        attempted, rejected, lookups = 0, 0, 0
+        themes = []
+        cap = self.config.discovery_max_requests_per_refresh
+        asset_slug = ALIASES.get(base_asset, (base_asset.lower(),))[0]
+        for kind, slug in (("ASSET", asset_slug), ("MACRO", "interest-rates")):
+            if lookups >= cap:
+                reasons.append("DISCOVERY_TAG_REQUEST_LIMIT")
+                break
+            tag, sent = await self._tag(slug)
+            lookups += 1
+            attempted += int(sent)
+            if tag["status"] != "COMPLETE" and kind == "ASSET" and lookups < cap:
+                reasons.append("ASSET_TAG_UNAVAILABLE_CRYPTO_FALLBACK")
+                tag, sent = await self._tag("crypto")
+                lookups += 1
+                attempted += int(sent)
+            if tag["status"] == "COMPLETE":
+                aliases = (
+                    (base_asset, tag["label"], base_asset + "USDT")
+                    if kind == "ASSET" and tag["slug"] != "crypto"
+                    else ()
+                )
+                themes.append(
+                    {
+                        "kind": kind,
+                        "tag": tag,
+                        "offset": 0,
+                        "complete": False,
+                        "stopped": False,
+                        "aliases": aliases,
+                    }
+                )
+            else:
+                reasons.append("DISCOVERY_TAG_UNAVAILABLE_" + slug)
+        seen = set()
+        cursor = 0
+        for _ in range(max(0, cap - lookups)):
+            pending = [theme for theme in themes if not theme["complete"] and not theme["stopped"]]
+            if not pending:
+                break
+            theme = pending[cursor % len(pending)]
+            cursor += 1
+            tag = theme["tag"]
+            scope = {
+                "policy": "gamma_asset_tags_dollar_v3",
+                "tag_id": tag["id"],
+                "offset": theme["offset"],
+                "page_size": self.config.discovery_page_size,
+                "subject_aliases": theme["aliases"],
+                "order": "volume24hr",
+                "version": "v1",
+            }
+            slot = self.cache.reserve(
                 "poly_discovery", scope, self.clock.now(), self.config.markets_poll_minutes * 60
             )
-            if not reserved["granted"]:
-                result = reserved.get("cached")
+            if not slot["granted"]:
+                result = slot.get("cached")
                 if result is None:
-                    reasons.append(reserved["reason"])
-                    break
+                    theme["stopped"] = True
+                    reasons.append(slot["reason"])
+                    continue
             else:
                 attempted += 1
                 try:
@@ -80,21 +152,28 @@ class PolymarketPublic:
                         {
                             "active": "true",
                             "closed": "false",
+                            "version": "v1",
+                            "tag_id": tag["id"],
+                            "include_tag": "true",
                             "limit": self.config.discovery_page_size,
-                            "offset": page * self.config.discovery_page_size,
-                            "order": "id",
+                            "offset": theme["offset"],
+                            "order": "volume24hr",
                             "ascending": "false",
                         },
                     )
                     if not isinstance(raw, list) or len(raw) > self.config.discovery_page_size:
                         raise DomainError("Invalid discovery page schema")
-                    normalized = []
-                    invalid = 0
+                    normalized, invalid = [], 0
                     for item in raw:
                         try:
-                            # Gamma schemas do not document bare metric units sufficiently.
-                            # Quantitative eligibility requires a verified USD contract.
-                            normalized.append(normalize_market(item, self.clock.now()))
+                            normalized.append(
+                                normalize_market(
+                                    item,
+                                    self.clock.now(),
+                                    "GAMMA_NUM_DOLLAR_FIELDS_V1",
+                                    theme["aliases"],
+                                )
+                            )
                         except (ValueError, TypeError, KeyError):
                             invalid += 1
                     result = {
@@ -113,10 +192,11 @@ class PolymarketPublic:
                         "reason": type(error).__name__,
                         "observed_at": iso(self.clock.now()),
                     }
-                self.cache.finish(reserved["request_id"], result, self.clock.now())
+                self.cache.finish(slot["request_id"], result, self.clock.now())
             if result["status"] == "UNAVAILABLE":
+                theme["stopped"] = True
                 reasons.append(result.get("reason", "DISCOVERY_FAILURE"))
-                break
+                continue
             rejected += result.get("rejected", 0)
             if result.get("observed_at"):
                 observations.append(result["observed_at"])
@@ -127,11 +207,15 @@ class PolymarketPublic:
                     markets.append(item)
                     progress += 1
             if result["raw_count"] and not progress:
+                theme["stopped"] = True
                 reasons.append("DISCOVERY_PAGE_NO_PROGRESS")
-                break
-            if result["raw_count"] < self.config.discovery_page_size:
-                complete = rejected == 0
-                break
+            elif result["raw_count"] < self.config.discovery_page_size:
+                theme["complete"] = result.get("rejected", 0) == 0
+                theme["stopped"] = not theme["complete"]
+            theme["offset"] += self.config.discovery_page_size
+        complete = (
+            bool(themes) and all(t["complete"] for t in themes) and not reasons and rejected == 0
+        )
         if not complete:
             reasons.append("DISCOVERY_PARTIAL_OR_REQUEST_LIMIT")
         return {
@@ -141,13 +225,23 @@ class PolymarketPublic:
             "requests_this_process": attempted,
             "rejected_items": rejected,
             "complete": complete,
-            "reasons": reasons,
+            "reasons": list(dict.fromkeys(reasons)),
             "scope": {
                 "base_asset": base_asset,
                 "active": True,
                 "closed": False,
-                "max_pages": self.config.discovery_max_requests_per_refresh,
+                "max_requests": cap,
                 "page_size": self.config.discovery_page_size,
+                "coverage": "ASSET_AND_INTEREST_RATE_TAGS_ONLY",
+                "themes": [
+                    {
+                        "kind": t["kind"],
+                        "tag_id": t["tag"]["id"],
+                        "slug": t["tag"]["slug"],
+                        "complete": t["complete"],
+                    }
+                    for t in themes
+                ],
             },
         }
 

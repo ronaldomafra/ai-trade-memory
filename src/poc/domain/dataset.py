@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from poc.domain.candles import INTERVAL_SECONDS
 from poc.domain.features import rsi_bucket, volume_bucket
 from poc.domain.learning import hold_return, net_entry_return
 from poc.domain.models import Quote
@@ -42,6 +43,12 @@ CORE_FIELDS = {
     "exit_quote",
     "return_pct",
 }
+PROFILE_CORE_FIELDS = CORE_FIELDS | {
+    "interval_seconds",
+    "trend_interval",
+    "reference_candle_close_time",
+    "outcome_quote_window_seconds",
+}
 ORIGIN_FIELDS = {
     "origin_id",
     "origin_run_id",
@@ -74,10 +81,12 @@ def validate_record(record: dict, cutoff: datetime) -> None:
     if set(record) != {"core", "origins"} or not isinstance(record["core"], dict):
         raise DomainError("Unknown dataset record fields")
     core = record["core"]
-    if set(core) != CORE_FIELDS or core["fixture"] is not False:
+    v2 = core.get("label_version") == "profile_labels_v2"
+    if set(core) != (PROFILE_CORE_FIELDS if v2 else CORE_FIELDS) or core["fixture"] is not False:
         raise DomainError("Invalid schema or fixture in reusable dataset")
     if core["sample_id"] != stable_id(
-        "equivalence_v1", {k: v for k, v in core.items() if k != "sample_id"}
+        "profile_equivalence_v2" if v2 else "equivalence_v1",
+        {k: v for k, v in core.items() if k != "sample_id"},
     ):
         raise DomainError("Learning example hash mismatch")
     if (
@@ -86,7 +95,7 @@ def validate_record(record: dict, cutoff: datetime) -> None:
         or core["quote_asset"] != "USDT"
     ):
         raise DomainError("Invalid asset identity")
-    if (
+    if not v2 and (
         core["interval"] != "15m"
         or core["profile_id"] != "trend_15m_v1"
         or core["profile_version"] != "1"
@@ -94,7 +103,23 @@ def validate_record(record: dict, cutoff: datetime) -> None:
         or core["equivalence_version"] != "equivalence_v1"
     ):
         raise DomainError("Unsupported label/profile schema")
-    if type(core["horizon_bars"]) is not int or core["horizon_bars"] not in (4, 16):
+    if v2 and (
+        core["interval"] not in INTERVAL_SECONDS
+        or core["interval_seconds"] != INTERVAL_SECONDS[core["interval"]]
+        or core["trend_interval"] not in INTERVAL_SECONDS
+        or core["equivalence_version"] != "profile_equivalence_v2"
+        or core["feature_version"] != "profile_features_v2"
+        or not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", core["profile_id"])
+        or not str(core["profile_version"]).isdigit()
+        or type(core["outcome_quote_window_seconds"]) is not int
+        or not 1 <= core["outcome_quote_window_seconds"] <= 90
+    ):
+        raise DomainError("Unsupported generic profile protocol")
+    if (
+        type(core["horizon_bars"]) is not int
+        or core["horizon_bars"] <= 0
+        or (not v2 and core["horizon_bars"] not in (4, 16))
+    ):
         raise DomainError("Invalid horizon")
     expected_kind = {"flat": "ENTRY_LONG_NET_RETURN", "holding": "HOLD_VS_SELL_RETURN"}.get(
         core["position_context"]
@@ -127,6 +152,15 @@ def validate_record(record: dict, cutoff: datetime) -> None:
     expected_maturity = at.replace(
         minute=at.minute // 15 * 15, second=0, microsecond=0
     ) + timedelta(minutes=15 * core["horizon_bars"])
+    if v2:
+        anchor = utc(core["reference_candle_close_time"])
+        if int(anchor.timestamp()) % core[
+            "interval_seconds"
+        ] != 0 or not anchor <= at <= anchor + timedelta(seconds=90):
+            raise DomainError("Invalid reference closed-candle anchor")
+        expected_maturity = anchor + timedelta(
+            seconds=core["interval_seconds"] * core["horizon_bars"]
+        )
     if (
         maturity != expected_maturity
         or reference.symbol != core["symbol"]
@@ -135,7 +169,9 @@ def validate_record(record: dict, cutoff: datetime) -> None:
         raise DomainError("Maturity or quote symbol mismatch")
     if (
         not at < reference.observed_at < maturity
-        or not maturity <= exit_quote.observed_at <= maturity + timedelta(seconds=90)
+        or not maturity
+        <= exit_quote.observed_at
+        <= maturity + timedelta(seconds=core.get("outcome_quote_window_seconds", 90))
     ):
         raise DomainError("Quote outside label window")
     if not reference.fresh(reference.received_at, 30) or not exit_quote.fresh(

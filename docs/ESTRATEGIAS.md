@@ -1,6 +1,6 @@
 # Estilos e estratégias para a execução da POC
 
-**Fechamento D050/SPEC 1.49:** [escopo V1](ESCOPO_POC_V1.md) e [backlog técnico](BACKLOG_IMPLEMENTACAO.md) dão a destinação vigente às notas históricas de discussão futura. Catálogo inicial trend_15m_v1, HTTP/TUI após núcleo; outros estilos/transferência automática são evolução. Implementação/validação pendentes.
+**Atualização D056/SPEC 1.54 — 14/10/2026:** pesquisa aprofundada e plano de cadastro/templates de swing, scalping e day trade em [PESQUISA_PERFIS_ESTRATEGIA.md](PESQUISA_PERFIS_ESTRATEGIA.md) e [PLANO_PERFIS_ESTRATEGIA.md](PLANO_PERFIS_ESTRATEGIA.md). Hold fica para depois. O código atual executa somente trend_15m_v1; os novos presets são propostas ainda não implementadas. O texto abaixo conserva a pesquisa inicial de 11/10; transferência já integra V1 por D052 e não está mais excluída.
 
 **D030 — suporte a outros ativos na V1:** um par Spot configurável com cotação USDT por sessão, selecionado antes de iniciar; BTC é exemplo/default. Banco, trio A/B/C e memória por símbolo permanecem separados. Quantidades, metadados, feeds, prompts e contexto usam o ativo destino. Retomada mantém o par salvo; transferência estatística entre moedas continua em P014. [Contrato vigente, seção 4.3](SPEC.md). Implementação pendente.
 
@@ -102,4 +102,4 @@ Antes de habilitar um perfil, definir sua hipótese, família de sinais, dados e
 
 Cada perfil deve produzir evidências próprias de integridade, amostragem e desempenho. Horizontes de 4/16 candles não devem ser herdados automaticamente: 4 candles de 1m e 4 candles de 4h avaliam eventos diferentes.
 
-As decisões de escopo estão guardadas em [PONTOS_A_ESCLARECER.md](PONTOS_A_ESCLARECER.md). A pesquisa não seleciona um estilo novo nem modifica a SPEC.
+As decisões de escopo estão guardadas em [PONTOS_A_ESCLARECER.md](PONTOS_A_ESCLARECER.md). Esta pesquisa inicial não habilita estilos; D056 posteriormente selecionou swing/scalping/day trade para o plano de implementação, com contratos propostos e hold adiado.

@@ -1,13 +1,17 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from poc.domain.factors import (
     CLASSES,
     classification_payload,
     classification_result,
     entry_foundation,
     foundation_choices,
+    news_conflict_payload,
+    news_conflict_result,
 )
-from poc.domain.primitives import iso
+from poc.domain.primitives import DomainError, iso
 
 NOW = datetime(2026, 10, 12, 12, tzinfo=UTC)
 EVIDENCE = {
@@ -122,3 +126,49 @@ def test_conflict_or_low_confidence_cannot_be_sole_premise_but_independent_facts
     factor["classification_confidence"] = "HIGH"
     assert entry_foundation(s, foundation_response(s, "FACTOR_0"))[0]
     assert not entry_foundation(s, {"answers": {}})[0]
+
+
+def test_shared_conflict_payload_is_canonical_bounded_and_strictly_validated():
+    items = [EVIDENCE, {**EVIDENCE, "item_id": "two"}]
+    payload = news_conflict_payload(items, "ETHUSDT", "ETH", "typesafe/jev-1.13")
+    assert payload == news_conflict_payload(
+        list(reversed(items)), "ETHUSDT", "ETH", "typesafe/jev-1.13"
+    )
+    assert set(payload["questions"]) == {"conflict_0", "conflict_1"}
+    response = {
+        "id": "mock-gen",
+        "model": "mock-model",
+        "answers": {
+            key: answer("NO_CONFLICT", CLASSES["factual_conflict"]) for key in payload["questions"]
+        },
+    }
+    result = news_conflict_result(response, items, "mock-call", iso(NOW))
+    assert set(result["checks"]) == {"one", "two"}
+    response["answers"]["conflict_0"]["probabilities"] = {"NO_CONFLICT": 1}
+    with pytest.raises(DomainError, match="Invalid structured semantic"):
+        news_conflict_result(response, items, "mock-call", iso(NOW))
+    for invalid in (
+        [],
+        items[:1],
+        [EVIDENCE, EVIDENCE],
+        [{**EVIDENCE, "item_id": str(i)} for i in range(6)],
+    ):
+        with pytest.raises(DomainError):
+            news_conflict_payload(invalid, "ETHUSDT", "ETH", "typesafe/jev-1.13")
+    with pytest.raises(DomainError, match="exceeds 16 KB"):
+        news_conflict_payload(
+            [{**row, "excerpt": "x" * 16000} for row in items],
+            "ETHUSDT",
+            "ETH",
+            "typesafe/jev-1.13",
+        )
+
+
+def test_news_split_preserves_existing_polymarket_questionnaire_and_version():
+    evidence = {**EVIDENCE, "source_kind": "PREDICTION_EXPECTATION"}
+    payload = classification_payload(evidence, [], "ETHUSDT", "ETH", "typesafe/jev-1.13")
+    assert payload["state"]["criteria_version"] == "external_factors_v2"
+    assert "factual_conflict" in payload["questions"]
+    result = classification_result(classification(), evidence, [], "mock-call", iso(NOW))
+    assert result["criteria_version"] == "external_factors_v2"
+    assert result["raw_answers"]["factual_conflict"]["choice"] == "NO_CONFLICT"

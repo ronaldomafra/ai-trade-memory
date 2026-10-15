@@ -1,6 +1,6 @@
 # ai-trade-memory
 
-**Contexto externo aprovado:** notícias e Polymarket com fatores separados e evidência curta, mesma base B/C; critérios e políticas D002/D018–D049 no [contrato vigente](docs/SPEC.md). P012 encerrado para discussão; detalhes técnicos serão resolvidos na implementação, de forma proporcional à POC. Implementação integrada ao motor; validação semântica real e unidades monetárias Gamma ainda pendentes em E05.
+**Contexto externo aprovado:** notícias e Polymarket com fatores separados e evidência curta, mesma base B/C; critérios e políticas D002/D018–D049 no [contrato vigente](docs/SPEC.md). Implementação integrada ao motor. A descoberta por moeda e o contrato monetário Gamma foram corrigidos; acompanhe a validação real e o ensaio de 24h no [status](docs/STATUS_DESENVOLVIMENTO.md).
 
 **D030 — suporte a outros ativos na V1:** um par Spot configurável com cotação USDT por sessão, selecionado antes de iniciar; BTC é exemplo/default. Banco, trio A/B/C e memória por símbolo permanecem separados. Quantidades, metadados, feeds, prompts e contexto usam o ativo destino. Retomada mantém o par salvo; transferência separada integra V1 conforme D052/SPEC 10.10. [Contrato vigente, seção 4.3](docs/SPEC.md). BTC/ETH validados em sessões e testes independentes.
 
@@ -14,7 +14,30 @@
 
 ## Documentação fechada
 
-[Escopo V1](docs/ESCOPO_POC_V1.md) · [SPEC 1.50](docs/SPEC.md) · [Backlog técnico](docs/BACKLOG_IMPLEMENTACAO.md) · [Índice](docs/README.md).
+[Escopo V1](docs/ESCOPO_POC_V1.md) · [SPEC 1.58](docs/SPEC.md) · [Backlog técnico](docs/BACKLOG_IMPLEMENTACAO.md) · [Índice](docs/README.md).
+
+**D060 — prazo do scalping:** perfis SCALPING aceitam até 15 segundos após
+fechar o candle. Configurar `app.max_candle_decision_lag_seconds` no perfil;
+revisões e sessões existentes conservam o prazo anterior. Teste ZEC revisão 2
+iniciado como `zec-scalping-02`, com timeout JEV 6s. [Guia](docs/GUIA_PERFIS_BOTS.md).
+
+**D059 — orçamento por bot:** limites de chamadas e custo JEV são defaults
+editáveis do perfil e ajustáveis na criação de cada sessão. Contagem independente
+por bot/dia UTC; total geral apenas como relatório. Configuração em `ai` e consulta
+com `uv run python -m poc ai-budget --run-id ID`. [Guia](docs/GUIA_PERFIS_BOTS.md).
+
+**D058 — idioma do JEV:** novos templates e defaults usam objetivos/orientações
+em inglês, seguindo a documentação oficial da TypeSafe. Interface e documentação
+continuam em português; parâmetros e snapshots existentes são preservados.
+[Cadastro e uso dos perfis](docs/GUIA_PERFIS_BOTS.md).
+
+**D057 — perfis cadastráveis:** a TUI permite criar, duplicar, validar e publicar
+revisões com parâmetros/instruções JEV, depois criar bots por perfil/par/dataset.
+Templates de swing, scalping e day trade são pontos de partida para famílias
+parametrizáveis, sem execução automática ou garantia de retorno. Legado preservado;
+hold adiado. [Guia de perfis e bots](docs/GUIA_PERFIS_BOTS.md) ·
+[Plano P00–P09](docs/PLANO_PERFIS_ESTRATEGIA.md) ·
+[pesquisa](docs/PESQUISA_PERFIS_ESTRATEGIA.md).
 
 D050–D052 consolidam motores por sessão/Docker, orçamento global e V1 com transferência automática, REST/WSS/token/2FA e TUI remota após núcleo. [Plano ordenado E00–E11](docs/PLANO_DESENVOLVIMENTO_V1.md) · [Status](docs/STATUS_DESENVOLVIMENTO.md). Sem microaprovações; detalhes rotineiros são implementação/testes. Os módulos disponíveis estão na seção de execução atual; validações externas e aceite prolongado permanecem explícitos.
 
@@ -219,7 +242,7 @@ O sistema registra `usage.cost`, tokens, latência, modelo e status de cada cham
 
 Pela [decisão D005](docs/DECISIONS.md), cada pedido JEV de classificação ou negociação permite uma chamada inicial e uma única repetição (`max_retries: 1`). As tentativas físicas são registradas separadamente, inclusive possível cobrança desconhecida após timeout. Prazo e orçamento podem impedir a repetição; restart preserva o contador. Falha final da decisão resulta em HOLD, com monitoramento de risco ativo.
 
-O desenho aprovado usa **fatores externos com evidência curta**: cálculos do Polymarket são locais; classificações semânticas necessárias usam JEV e são reutilizadas entre decisões e B/C enquanto válidas. Todas as chamadas de classificação entram no mesmo orçamento global de IA. Esse processamento ainda depende de implementação e de critérios detalhados, conforme [D002](docs/DECISIONS.md) e [contexto de fontes](docs/FONTES_DE_CONTEXTO.md).
+O desenho aprovado usa **fatores externos com evidência curta**: cálculos do Polymarket são locais; classificações semânticas necessárias usam JEV e são reutilizadas entre decisões e B/C enquanto válidas. Chamadas físicas de classificação entram no orçamento JEV do bot pagador (D059), sem duplicar cobrança por reuso. Esse processamento ainda depende de implementação e de critérios detalhados, conforme [D002](docs/DECISIONS.md) e [contexto de fontes](docs/FONTES_DE_CONTEXTO.md).
 
 ## Como executar (interface prevista)
 
@@ -329,7 +352,37 @@ docker compose stop engine_btc
 
 Compose restaura sessões previamente preparadas (`session-btc` e, no perfil `parallel`, `session-eth`), cada uma com seu SQLite/volume. Sem portas públicas; API interna usa 8081. Prepare os bancos pelo CLI antes do Compose. Alternativa systemd em deploy/jev-paper-trading@.service; ajuste usuário/caminhos locais e use apenas um supervisor por sessão. SIGTERM encerra tarefas e projeta eventos; fechar consultas não encerra o engine.
 
-Configure OPENROUTER_API_KEY localmente. Smoke faz no máximo uma tentativa física, registra a cobrança observada e nunca chama o broker. HTTP 401/402/403 abre circuito persistido vinculado à credencial; corrigir a chave libera uma identidade de credencial nova. Não usar Binance keys. O orçamento global em data/operational/ai-budget.sqlite3 limita todas as sessões a 240 tentativas e US$ 0,05 observado/dia UTC. Custos ausentes ficam unknown; não há garantia de teto absoluto de fatura com cobrança desconhecida. Logs/exports incluem decisões, ai_calls e custos sem credenciais.
+Configure OPENROUTER_API_KEY localmente. Smoke faz no máximo uma tentativa física, registra a cobrança observada e nunca chama o broker. HTTP 401/402/403 abre circuito persistido vinculado à credencial; corrigir a chave libera uma identidade de credencial nova. Não usar Binance keys. D059 mantém reservas em data/operational/ai-budget.sqlite3, com contagem e limites próprios por bot nos perfis cadastráveis. Os defaults editáveis são 240 tentativas e US$ 0,05 por bot/dia UTC; custo pode ser desabilitado. D053 é somente compatibilidade do contrato antigo. Custos ausentes ficam unknown; não há garantia de teto absoluto de fatura com cobrança desconhecida. Logs/exports incluem decisões, ai_calls e custos sem credenciais.
+
+**D053 é compatibilidade legada; novos perfis usam D059.** Não há espera obrigatória
+de 24h (D054): você define o período de amostragem e quando solicitar atualização
+ou análise. Atualizações preservam o histórico; análises distinguem versões,
+intervalos e lacunas, sem exigir outra contagem de 24h. Após atualizar todos os
+motores/controle para a versão compatível, use `ai-budget --run-id ID` para
+consultar o orçamento do bot e `ai-budget` para o total agregado. Configure os
+limites nos parâmetros `ai` do perfil/criação. GET
+`/v1/sessions/{run_id}/ai-budget` consulta uso/limites; PUT `/v1/ai-budget` foi
+retirado desse fluxo. Somente contratos antigos usam `--legacy-global` e
+`/v1/legacy-ai-budget`. O [guia](docs/GUIA_CONFIGURACAO_EXECUCAO.md) descreve os
+campos/permissões e a preservação dos históricos.
+
+Antes da inferência, `uv run python -m poc check-openrouter` verifica a chave por
+GET sem gerar decisão/cobrança de inferência. `--recover-auth` libera somente um
+circuito 401 antigo da credencial autenticada; mantém outros bloqueios, histórico
+e orçamento. As credenciais do `.env` prevalecem sobre valores antigos exportados.
+O endpoint de consulta está na
+[documentação oficial](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key).
+
+## Reaproveitamento das notícias
+
+**Otimização de notícias D055 preparada, ainda não implantada:** cada notícia tem
+interpretação reutilizável própria; uma comparação factual compartilhada avalia o
+conjunto selecionado. Trocar uma entre cinco notícias exige duas chamadas em vez
+de cinco reclassificações completas; reordenar não gera chamadas. Na primeira
+carga são cinco interpretações e uma comparação. Falha da comparação mantém
+conflito indeterminado, sem usar a avaliação do conjunto anterior. Recibos ficam
+na auditoria; negociação recebe os fatores e evidências sem repetir esses IDs.
+Detalhes em [SPEC 5.29.1](docs/SPEC.md#5291-reaproveitamento-por-notícia-e-comparação-compartilhada-d055).
 
 ## Memória e datasets
 
@@ -343,9 +396,15 @@ Importe antes da primeira decisão ou selecione learning.initial_dataset_path no
 
 ## Contexto externo e relatórios
 
-Coleta de RSS/Marketaux roda separada do risco. Marketaux usa somente a conta gratuita (100 requisições/dia compartilhadas e até três itens na primeira página), com truncamento explícito; token pode ser preenchido depois. Conteúdo novo/alterado é classificado pela Decisions API dentro do orçamento global e reutilizado. As decisões recebem fatores e evidência curta; artigos integrais e dados futuros não entram no prompt. B/C usam o mesmo snapshot externo. Sem fatores por falha/pendência, compras B/C ficam bloqueadas; saídas de risco continuam.
+Coleta de RSS/Marketaux roda separada do risco. Marketaux usa somente a conta gratuita (100 requisições/dia compartilhadas e até três itens na primeira página), com truncamento explícito; token pode ser preenchido depois. Conteúdo novo/alterado é classificado pela Decisions API dentro do orçamento do bot pagador e reutilizado. As decisões recebem fatores e evidência curta; artigos integrais e dados futuros não entram no prompt. B/C usam o mesmo snapshot externo. Sem fatores por falha/pendência, compras B/C ficam bloqueadas; saídas de risco continuam.
 
-Polymarket usa apenas Gamma /markets, CLOB /book e Data /v2/trades públicos por GET. Proxy opcional fica em POLYMARKET_PROXY_URL no .env local; nunca em código ou export. Unidade Gamma ainda não suficientemente documentada nas referências verificadas: métricas bare permanecem UNVERIFIED, excluindo o sinal quantitativo até comprovação de unidade/semântica. Isso não impede fatores válidos de notícias.
+Polymarket usa apenas leituras públicas GET: Gamma /tags/slug e /markets, CLOB /book e Data /v2/trades. A descoberta consulta a moeda da sessão e juros, com até cinco requisições por revisão, incluindo consultas de tags. Proxy opcional fica em POLYMARKET_PROXY_URL no .env local; nunca em código ou export. O contrato v1 usa liquidityNum e volume24hr, cuja escala monetária é demonstrada nas referências oficiais; campos CLOB sem contrato não substituem essas métricas. Dados sem unidade verificada continuam excluídos. Livro, spread, profundidade, negócio recente e classificação JEV ainda precisam passar pelos filtros, sem reduzir os pisos para produzir sinais.
+
+O estado de decisão conserva fatores selecionados, evidências, conflitos e tempos.
+Listas de candidatos rejeitados/pendências ficam na auditoria local; para o JEV,
+entram contagens por motivo, cobertura e estado das fontes. Os limites de 30 KB de
+estado/32 KB de requisição continuam; evidência selecionada excessiva resulta em HOLD.
+O dashboard distingue chamadas JEV, última coleta e quantidade de fatores utilizáveis.
 
 Janela de notícias ajustada antes da sessão é respeitada na consulta/filtro/validade.
 ID de evento Polymarket é referência inicial: associação literal requer pergunta e
@@ -372,6 +431,17 @@ Alterar segredos no .env exige reiniciar o controle/processo nativo e recriar
 containers dos motores preservando bancos/volumes: o ambiente é lido na partida,
 e docker restart sozinho mantém o ambiente antigo do container. Chave JEV nova
 usa outra identidade no circuito persistido, sem apagar orçamento/auditoria.
+
+Compose lê credenciais por `.env` montado somente leitura no controle/motores
+fixos (`POC_ENV_FILE`); motores dinâmicos recebem os valores carregados pelo
+servidor. O arquivo local prevalece sobre exports antigos dos provedores;
+`POC_DATA_DIR` continua aceitando override explícito de ambiente. Arquivo de
+credenciais explicitamente indicado e ausente é erro.
+
+Na retomada, uma revisão apenas de volume com os mesmos OHLC/janela preserva o
+candle originalmente observado e seu `available_at`, registrando
+`CANDLE_VOLUME_REVISION_IGNORED` sem duplicar ciclos/inferências/fills. Não se
+atualizam decisões ou features passadas. Diferenças de preços permanecem rejeitadas.
 
 Backups incluem SQLite canônico e bases operacionais existentes, cada arquivo com seu próprio corte consistente; não há transação conjunta entre bancos. Arquivos/projeções não substituem o ledger. Restore preserva identidade e capital e rejeita destino existente/corrompido. Se precisar reconstruir orçamento/quota, bloqueia novas chamadas IA/Marketaux até o próximo dia UTC para não gastar capacidade incerta; RSS e risco/paper continuam. Não sobrescreve orçamento atual com backup antigo. Faça recuperação em diretório isolado, confira validate-data e só então planeje substituição do serviço parado.
 
@@ -452,18 +522,22 @@ publica domínio por conta própria. Segredos seguem .env/ambiente privados.
 
 ## Validação atual e limites
 
-191 testes conjuntos passaram após integrar REST/WS/TUI e revisar contexto/E11; casos sintéticos
+264 testes conjuntos passaram após corrigir contexto, credenciais, retomada de candles, descoberta Polymarket, detecção de suspensão, TUI, política global de custo e reaproveitamento de notícias (D053/D055 ainda não implantados); casos sintéticos
 ficam exclusivamente em fixtures/temporários e não entram no catálogo operacional.
 Binance REST/WS e Docker/lifecycle/backup/restore têm ensaios reais locais. Gateway
 nativo e em Docker preservaram motores no logout/SIGTERM; cliente TUI exibiu sessão
 real. [Status/evidências](docs/STATUS_DESENVOLVIMENTO.md) detalham cada etapa.
 
-OpenRouter autenticado respondeu 401 no ensaio: integração com resposta válida
-continua pendente e a chave rejeitada não é reenviada indefinidamente. Token
-Marketaux fica para preenchimento posterior pelo usuário; RSS tem cobertura
-parcial explícita. Gamma/CLOB/Data Polymarket acessíveis pelo proxy local, mas
-campos Gamma com unidade USD não suficientemente documentada permanecem excluídos
-dos sinais quantitativos. Não há prova de ACTIVE transferido/rentabilidade real.
+Em 13/10/2026, nova credencial foi autenticada e smoke Decisions retornou JEV válido,
+modelo/ID e custo real auditados. Imagens corrigidas foram aplicadas à sessão ETH;
+retomada/reinicialização reais passaram e cinco classificações JEV retornaram
+HTTP 200/quatro fatores de notícias utilizáveis. Decisões por candle reais também
+responderam HTTP 200; aceite prolongado continua em acompanhamento.
+Marketaux e RSS Cointelegraph responderam na sessão, com cobertura parcial
+explícita; CoinDesk indisponível. A correção Polymarket confirmou quatro fatores reais
+na ETH após verificar unidades, associação, livro/negócio e classificação JEV,
+mantendo os pisos de qualidade. [Evidência](docs/relatorios/VALIDACAO_POLYMARKET_20261013.md).
+Não há prova de ACTIVE transferido/rentabilidade real.
 O ensaio obrigatório de 24 horas ainda não foi concluído; não declarar aceite
 operacional desassistido antes dessa evidência.
 
@@ -477,8 +551,10 @@ Para runtime dinâmico, pare explicitamente e remova somente o container
 identificado por engine-status, sem remover volumes/diretório; start-engine
 recria usando o banco aceito. Backup/restore permanece disponível.
 
-Ensaio E11 iniciado com sessões próprias acceptance-v1-btc e acceptance-v1-eth.
-São novos trios de paper, com configurações/identidades isoladas. Consultar:
+O ensaio E11 anterior foi interrompido pelo reset solicitado em 13/10/2026;
+suas sessões/artefatos foram removidos. Os comandos abaixo são exemplos para um
+novo ensaio após preparar sessões próprias com esses identificadores, cada uma
+com banco/configuração/carteiras isoladas:
 
 ```bash
 uv run python -m poc engine-status --run-id acceptance-v1-btc
@@ -487,8 +563,11 @@ uv run python -m poc validate-data --run-id acceptance-v1-btc
 uv run python -m poc validate-data --run-id acceptance-v1-eth
 ```
 
-Início não equivale a conclusão de 24h. JEV rejeitado/Marketaux ausente e métricas
-Gamma não verificadas continuam registrados; decisões técnicas e proteção
+Novo ensaio ETH iniciado em 14/10/2026 às 08:28:50 de Brasília, até 15/10 no mesmo horário;
+artefatos em `data/acceptance/eth-24h-20261014T112850Z`. O anterior foi interrompido por suspensão do host.
+O observador novo bloqueia sleep/idle temporariamente e detecta lacunas/relógio para não declarar continuidade indevida. Início não equivale a
+conclusão de 24h. Métricas fora do contrato Gamma verificado continuam excluídas;
+aceite prolongado continua pendente. Decisões técnicas e proteção
 funcionam com fontes públicas disponíveis. Nenhuma rentabilidade ou homologação
 é presumida.
 

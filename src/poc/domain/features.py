@@ -92,15 +92,18 @@ def volume_bucket(value: float) -> str:
 
 
 class FeatureEngine:
-    def __init__(self, parameters: IndicatorParameters):
+    def __init__(self, parameters: IndicatorParameters, profile=None):
         self.parameters = parameters
+        self.profile = profile
 
     def build(
         self, symbol: str, candles: list[Candle], trend: list[Candle], cutoff: datetime
     ) -> Features:
         try:
-            bars = closed_sequence(candles, symbol, "15m", cutoff)
-            hours = closed_sequence(trend, symbol, "1h", cutoff)
+            interval = self.profile.market.interval if self.profile else "15m"
+            trend_interval = self.profile.market.trend_interval if self.profile else "1h"
+            bars = closed_sequence(candles, symbol, interval, cutoff)
+            hours = closed_sequence(trend, symbol, trend_interval, cutoff)
             return self._compute(symbol, bars, hours, cutoff)
         except (DomainError, ValueError, OverflowError, ZeroDivisionError) as exc:
             return Features(False, str(exc), symbol, cutoff)
@@ -159,7 +162,8 @@ class FeatureEngine:
         )
         if any(v is None or not isfinite(v) for v in values):
             raise DomainError("INVALID_FEATURES")
-        return Features(
+        horizons = self.profile.indicators.return_horizons_bars if self.profile else (1, 4, 16)
+        result = Features(
             True,
             "VALID",
             symbol,
@@ -176,5 +180,37 @@ class FeatureEngine:
             rsi_bucket(rsi_value),
             volume_bucket(ratio),
             volatility,
-            tuple((closes[-1] / closes[-1 - h] - 1) * 100 for h in (1, 4, 16)),
+            tuple((closes[-1] / closes[-1 - h] - 1) * 100 for h in horizons),
         )
+        if self.profile is None:
+            return result
+        technical = self.profile.strategy.technical
+        if technical.entry_rule == "EMA_CROSS":
+            setup = ema(closes, p.ema_short)[-2] <= ema(closes, p.ema_mid)[-2] and e_short > e_mid
+        elif technical.entry_rule == "PRIOR_HIGH_BREAKOUT":
+            n = technical.breakout_lookback_candles
+            if len(bars) <= n:
+                raise DomainError("INSUFFICIENT_SETUP_HISTORY")
+            level = max(b.high for b in bars[-n - 1 : -1])
+            setup = bars[-1].close > level * (1 + technical.breakout_buffer_pct / 100)
+        else:
+            setup = e_short > e_mid > e_long
+        return ProfileFeatures(
+            **{**asdict(result), "feature_version": "profile_features_v2"},
+            decision_interval=self.profile.market.interval,
+            trend_interval=self.profile.market.trend_interval,
+            trend_direction=hourly_regime,
+            rsi_period=p.rsi,
+            return_horizons_bars=tuple(horizons),
+            structural_entry_setup=setup,
+        )
+
+
+@dataclass(frozen=True)
+class ProfileFeatures(Features):
+    decision_interval: str = "15m"
+    trend_interval: str = "1h"
+    trend_direction: str = "unknown"
+    rsi_period: int = 14
+    return_horizons_bars: tuple[int, ...] = (1, 4, 16)
+    structural_entry_setup: bool = False

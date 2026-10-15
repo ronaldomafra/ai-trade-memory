@@ -71,7 +71,7 @@ ai:
   timeout_seconds: 20
   max_retries: 1
   max_calls_per_day: 240
-  max_observed_cost_usd_per_day: "0.05"
+  max_observed_cost_usd_per_day: "0.05"  # legado/default; política global explícita prevalece (ai-budget)
   fail_closed: true
   prompt_version: jev_trade_v1
 

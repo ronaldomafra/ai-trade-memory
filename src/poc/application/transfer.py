@@ -140,7 +140,7 @@ class TransferEngine:
             "patterns": composed,
             "transfer": {
                 "policy_version": "transfer_v1",
-                "normalizer_version": "relative_features_v1",
+                "normalizer_version": self.config.learning.transfer.normalizer_version,
                 "groups": diagnostics,
                 "publication_error": self.last_publication_error,
             },
@@ -160,7 +160,12 @@ class TransferEngine:
         }
         run = self.store.run()["run_id"]
         group = stable_id(
-            run, state["symbol"], self.protocol, "transfer_v1", "relative_features_v1", key
+            run,
+            state["symbol"],
+            self.protocol,
+            "transfer_v1",
+            self.config.learning.transfer.normalizer_version,
+            key,
         )
         validation_key = {
             field: key[field]
@@ -171,7 +176,7 @@ class TransferEngine:
             state["symbol"],
             self.protocol,
             "transfer_v1",
-            "relative_features_v1",
+            self.config.learning.transfer.normalizer_version,
             validation_key,
         )
         return key, run, group, validation_key, validation_group
@@ -295,7 +300,7 @@ class TransferEngine:
             "pattern_id": group,
             "pattern_version": "transfer_v1",
             "source_scope": "TRANSFERRED",
-            "normalizer_version": "relative_features_v1",
+            "normalizer_version": self.config.learning.transfer.normalizer_version,
             "target_symbol": state["symbol"],
             "source_sample_count": len(selected),
             "destination_validation_sample_count": gate["sample_count"],

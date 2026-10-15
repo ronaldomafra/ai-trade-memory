@@ -13,6 +13,7 @@ from poc.domain.factors import CLASSES
 from poc.domain.jev import parse_trade_response
 from poc.domain.models import PortfolioKind
 from poc.domain.prediction import normalize_book, normalize_market
+from poc.domain.primitives import utc
 
 
 def prediction_market(units="REPORTED_USD_V1"):
@@ -111,6 +112,54 @@ class News:
                 )
             ],
         }
+
+
+@pytest.mark.asyncio
+async def test_prediction_discovery_response_is_available_after_network_latency(tmp_path):
+    cfg, _, db, _ = setup(tmp_path / "session")
+    clock = Clock(NOW)
+    cache = SourceCache(tmp_path / "sources.sqlite3")
+    client = Client()
+    classifier = ContextClassifier(cfg, client, cache, clock, "synthetic-key-version")
+    observed = NOW + timedelta(seconds=2)
+    market = prediction_market()
+    for key in ("observed_at", "liquidity_observed_at", "volume_observed_at"):
+        market[key] = observed.isoformat()
+
+    class Poly:
+        async def discover(self, base):
+            clock.at = observed
+            return {"complete": True, "observed_at": observed.isoformat(), "markets": [market]}
+
+        async def book(self, metadata):
+            return prediction_book(metadata)
+
+        async def recent_trade(self, metadata):
+            return {
+                "condition_id": metadata["condition_id"],
+                "token_id": metadata["token_id"],
+                "source_at": (NOW - timedelta(minutes=59)).isoformat(),
+                "observed_at": observed.isoformat(),
+            }
+
+    service = ContextService(cfg, "ETH", db, clock, cache, None, Poly(), classifier)
+    result = await service.collect_prediction_markets()
+    assert result["candidate_count"] == 1
+    assert result["status"] == "available" and len(result["items"]) == 1
+    assert client.calls == 1
+    assert service.markets[0]["observed_at"] == observed.isoformat()
+    assert utc(result["items"][0]["valid_until"]) == NOW + timedelta(minutes=1)
+    with db.transaction():
+        db.save_external_context(
+            {"news": {"status": "unavailable", "items": []}, "prediction_markets": result},
+            observed,
+        )
+    assert not service.snapshot(NOW)["prediction_markets"]["items"]
+    assert not service.snapshot(NOW + timedelta(minutes=1, seconds=1))["prediction_markets"][
+        "items"
+    ]
+    cache.close()
+    db.close()
 
 
 @pytest.mark.asyncio

@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from poc.application.ports import StorageFactory
-from poc.config import Config
+from poc.config import Config, parse_config
 from poc.domain.models import MarketMetadata
-from poc.domain.primitives import DomainError, iso, utc
+from poc.domain.primitives import DomainError, iso, stable_id, utc
 
 PROFILE_ID = "trend_15m_v1"
 PROFILE_VERSION = "1"
@@ -41,10 +41,16 @@ class SessionManager:
         self.storage = storage
 
     def prepare(
-        self, run_id: str, profile_id: str, metadata: MarketMetadata, now: datetime
+        self,
+        run_id: str,
+        profile_id: str,
+        metadata: MarketMetadata,
+        now: datetime,
+        profile_record: dict | None = None,
     ) -> dict[str, Any]:
         valid_run_id(run_id)
-        if profile_id != PROFILE_ID:
+        definition = getattr(self.config, "profile_definition", None)
+        if profile_id != (definition.profile.profile_id if definition else PROFILE_ID):
             raise DomainError("Unknown or unimplemented profile")
         if metadata.symbol != self.config.market.symbol or utc(metadata.observed_at) > utc(now):
             raise DomainError("Metadata does not match selected symbol or is from the future")
@@ -66,7 +72,9 @@ class SessionManager:
                 record = {
                     "run_id": run_id,
                     "profile_id": profile_id,
-                    "profile_version": PROFILE_VERSION,
+                    "profile_version": str(definition.profile.version)
+                    if definition
+                    else PROFILE_VERSION,
                     "symbol": metadata.symbol,
                     "base_asset": metadata.base_asset,
                     "quote_asset": metadata.quote_asset,
@@ -77,13 +85,30 @@ class SessionManager:
                     "created_at": iso(now),
                     "status": "PREPARED",
                     "code_version": "0.1.0",
-                    "template_version": "trend_15m_v1.1",
-                    "template_reference": "docs/SPEC.md#72",
-                    "template_original": Config().model_dump(mode="json"),
+                    "template_version": definition.profile.template_version
+                    if definition
+                    else "trend_15m_v1.1",
+                    "template_reference": definition.profile.documentation_reference
+                    if definition
+                    else "docs/SPEC.md#72",
+                    "template_original": profile_record["definition"]
+                    if profile_record
+                    else Config().model_dump(mode="json"),
                     "template_changes": configuration_changes(
                         Config().model_dump(mode="json"), self.config.model_dump(mode="json")
                     ),
                 }
+                if definition:
+                    record["profile_definition_original"] = (profile_record or {}).get(
+                        "definition", definition.model_dump(mode="json")
+                    )
+                    record["profile_hash"] = (profile_record or {}).get(
+                        "profile_hash", definition.hash
+                    )
+                    record["template_changes"] = configuration_changes(
+                        record["profile_definition_original"]["parameters"],
+                        definition.parameters.model_dump(mode="json"),
+                    )
                 db.create_session(
                     record,
                     str(self.config.portfolios.initial_usdt),
@@ -105,8 +130,17 @@ class SessionManager:
             record = db.run()
             if not record or record["run_id"] != run_id:
                 raise DomainError("Missing or incompatible session")
-            saved = Config.model_validate(record["config"])
-            if saved.hash != record["config_hash"] or record["profile_id"] != PROFILE_ID:
+            if stable_id(record["config"]) != record["config_hash"]:
+                raise DomainError("Persisted raw configuration hash mismatch")
+            saved = parse_config(record["config"])
+            definition = getattr(saved, "profile_definition", None)
+            profile_id = definition.profile.profile_id if definition else PROFILE_ID
+            version = str(definition.profile.version) if definition else PROFILE_VERSION
+            if (
+                saved.hash != record["config_hash"]
+                or record["profile_id"] != profile_id
+                or record["profile_version"] != version
+            ):
                 raise DomainError("Persisted configuration or profile is incompatible")
             # The immutable record retains original mounts; access paths follow the current mount.
             record["persisted_paths"] = record["paths"]

@@ -1,6 +1,11 @@
 # Perfis operacionais e sessões independentes
 
-**Escopo vigente D051/D052/SPEC 1.50:** [plano ordenado](PLANO_DESENVOLVIMENTO_V1.md) e [status](STATUS_DESENVOLVIMENTO.md). Catálogo inicial trend_15m_v1, TUI remota REST/WSS com token/2FA e transferência automática separada na V1; outros estilos são evolução. Notas antigas de pendências são históricas. Implementação/validação pendentes.
+**Escopo vigente D057/SPEC 1.55:** motor genérico e catálogo versionado de
+perfis implementados, com templates de swing/scalping/day trade e famílias
+parametrizáveis. Cadastro/publicação pela TUI não inicia motor; criar sessão fixa
+perfil/revisão/configuração e trio A/B/C. Legado preservado, hold adiado.
+[Guia](GUIA_PERFIS_BOTS.md) · [Plano](PLANO_PERFIS_ESTRATEGIA.md).
+Notas históricas abaixo descrevem a evolução; não substituem o status atual.
 
 **D030 — suporte a outros ativos na V1:** um par Spot configurável com cotação USDT por sessão, selecionado antes de iniciar; BTC é exemplo/default. Banco, trio A/B/C e memória por símbolo permanecem separados. Quantidades, metadados, feeds, prompts e contexto usam o ativo destino. Retomada mantém o par salvo; transferência estatística separada integra a V1 conforme D052/SPEC 10.10. [Contrato vigente, seção 4.3](SPEC.md). Implementação pendente.
 
@@ -20,7 +25,7 @@
 
 Uma sessão nova exige perfil explícito. Não iniciar automaticamente a estratégia técnica porque não houve escolha, nem interpretar `HOLD` como seleção de buy and hold. O catálogo lista ID, versão, descrição e estado real do perfil; candidato pesquisado ou incompleto não está disponível para operação.
 
-`trend_15m_v1` é o primeiro perfil aprovado em D011: curto prazo contínuo, 24/7, entradas/saídas A da seção 7.2, decisões em 15m, tendência 1h, máximo nominal de 16 candles (~4h), risco/custos e horizontes 4/16 atuais. Sem fechamento compulsório pela virada UTC; preservar trava diária e demais saídas de risco. Seu código e homologação continuam pendentes; não escolher um segundo perfil sem resposta do usuário.
+`trend_15m_v1` é o primeiro perfil aprovado em D011 e implementado: curto prazo contínuo, 24/7, entradas/saídas A da seção 7.2, decisões em 15m, tendência 1h, máximo nominal de 16 candles (~4h), risco/custos e horizontes 4/16 atuais. Sem fechamento compulsório pela virada UTC; preservar trava diária e demais saídas de risco. Homologação operacional segue as evidências no status. D056 selecionou swing, scalping e day trade para o plano de novos perfis, sem habilitá-los ainda.
 
 Para cada perfil pretendido, definir antes de habilitar:
 
@@ -42,7 +47,7 @@ Persistir template/versão, parâmetros base, alterações explícitas e configu
 
 Depois de criada, a sessão conserva os valores efetivos. Restaurar recupera essa configuração, mesmo se o template tiver evoluído; ajustes para outro experimento exigem sessão nova. Importação de aprendizado revalida compatibilidade com o protocolo efetivo, sem pressupor que o nome do perfil torna configurações equivalentes. Limites globais de IA continuam separados da parametrização do perfil.
 
-Não é necessário escolher agora um segundo estilo para registrar esse fluxo. Os perfis disponibilizados precisam de contratos/implementação/validação próprios; campos editáveis e regras detalhadas ainda serão especificados. Isso não habilita scalping/swing/hold apenas por editar um intervalo, nem antecipa fase/telas da TUI.
+D056 agora especifica esse fluxo em P01/P07/P08: novo perfil a partir de template completo, validação, cadastro versionado, publicação e seleção na nova sessão. Perfis disponibilizados precisam de contratos/implementação/validação próprios. Isso não habilita um estilo apenas por editar um intervalo; hold permanece fora desta etapa.
 
 Alterar só o intervalo no YAML não implementa outro estilo. Regras específicas de um novo perfil precisam de aprovação e testes; o perfil atual continua reproduzindo seu contrato. Mudanças após observar resultados abrem outra sessão/versionamento, sem reescrever resultados passados.
 
@@ -54,7 +59,7 @@ O diretório previsto é `data/sessions/RUN_ID/`, com `poc.sqlite3`, logs e expo
 
 **Restaurar sessão:** abrir banco escolhido e recuperar perfil/configuração, saldos, posições, ledger, ciclos, risco diário, chamadas/tentativas, memória, importações e cursores. Reavaliar risco no preço atual. Não repor capital, trocar perfil, importar novamente arquivo alterado ou negociar retroativamente. Banco ausente/inválido produz erro de restauração, sem criar automaticamente outra sessão. Lock impede dois motores no mesmo banco.
 
-Os comandos abaixo são contratos de desenvolvimento, ainda não executáveis:
+Os comandos legados abaixo possuem implementação; perfil/dados/credenciais precisam estar preparados conforme o guia. Os comandos novos de cadastro constam como planejados em P07:
 
 ```bash
 python -m poc profiles --config config/default.yaml
@@ -80,6 +85,6 @@ Dois perfis de 15m, com duas chamadas B/C separadas por ciclo, exigiriam nominal
 - P008/P014: dependência entre avaliações de candles consecutivos e detalhes de transferência de memória; origem/deduplicação aprovadas em D014, preservando separação de perfis incompatíveis.
 - P007: TUI por último; registrar desejo de criar/restaurar sessões sem antecipar fase ou controles.
 
-Validar seleção, isolamento dos bancos, criação sem sobrescrita, restauração sem reset, perfil/configuração imutáveis, ausência de trades retroativos e orçamento global concorrente antes da operação correspondente. Não há bot, bancos de sessões ou perfis executáveis gerados por esta documentação.
+Validar seleção, isolamento dos bancos, criação sem sobrescrita, restauração sem reset, perfil/configuração imutáveis, ausência de trades retroativos e orçamento global concorrente antes da operação correspondente. Novos templates documentais não criam perfis executáveis nem alteram sessões existentes.
 
 Ao criar sessão, resolver `market.symbol` ou `--symbol SYMBOL` juntamente com `--profile PROFILE_ID`; validar antes de criar carteiras. Por exemplo, sessões BTCUSDT e ETHUSDT podem usar o mesmo `trend_15m_v1`, cada uma com trio A/B/C e banco próprio. Comparação entre ativos não substitui C−B dentro de cada sessão. CLI/futura TUI usam o mesmo contrato; retomada mantém par/perfil/configuração salvos. Operação conjunta aguarda coordenação P015; novos estilos continuam com contratos próprios.

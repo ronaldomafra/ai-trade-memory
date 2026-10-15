@@ -2,7 +2,6 @@
 
 import asyncio
 import signal
-import time
 from contextlib import suppress
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -60,6 +59,7 @@ def sample_session(views: SessionViews, run_id: str, now: datetime | None = None
             and health.get("clock_status") == "VERIFIED"
         )
         source_states = db.runtime_state("external_sources") or {}
+        external = snapshot.get("external_context") or {}
         return {
             "run_id": run_id,
             "assessed_at": iso(now),
@@ -83,6 +83,24 @@ def sample_session(views: SessionViews, run_id: str, now: datetime | None = None
             "portfolios": snapshot["portfolios"],
             "ai_cost": snapshot["ai_cost"],
             "learning": snapshot["learning"],
+            "external_coverage": {
+                section: {
+                    "status": external.get(section, {}).get("status", "unavailable"),
+                    "coverage": external.get(section, {}).get("coverage", "UNAVAILABLE"),
+                    "usable_factor_count": len(external.get(section, {}).get("items", [])),
+                    "factor_ids": [
+                        item["factor_id"] for item in external.get(section, {}).get("items", [])
+                    ],
+                    "candidate_count": external.get(section, {}).get("candidate_count", 0),
+                    "pending_count": external.get(section, {}).get(
+                        "pending_count", len(external.get(section, {}).get("pending", []))
+                    ),
+                    "scope": external.get(section, {}).get(
+                        "scope", external.get(section, {}).get("discovery", {}).get("scope")
+                    ),
+                }
+                for section in ("news", "prediction_markets")
+            },
             "source_statuses": {
                 key: {
                     k: value
@@ -112,7 +130,9 @@ async def observe(
     manifest_path = output / "observation.json"
     if manifest_path.exists():
         raise DomainError("Use a new observation directory; prior evidence is never overwritten")
-    start_time, start_clock = datetime.now(UTC), time.monotonic()
+    start_time = datetime.now(UTC)
+    previous_frame_at = None
+    max_sample_gap_seconds = max(120, poll_seconds * 2)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     installed = []
@@ -127,12 +147,14 @@ async def observe(
         "started_at": iso(start_time),
         "required_wall_clock_hours": duration_hours,
         "poll_seconds": poll_seconds,
+        "max_sample_gap_seconds": max_sample_gap_seconds,
         "run_ids": sorted(set(run_ids)),
         "mode": "PAPER_OBSERVATION_READ_ONLY",
         "state": "RUNNING",
         "limits": [
             "Source/model validity must be assessed separately from accounting invariants.",
             "COMPLETED means elapsed wall time; acceptance requires reviewing all samples.",
+            "A sampling gap or backward clock interrupts the observation; engines keep running.",
         ],
     }
     try:
@@ -158,8 +180,23 @@ async def observe(
                     }
                     unavailable += 1
                 samples.append(sample)
-            elapsed = time.monotonic() - start_clock
+            # CLOCK_MONOTONIC excludes Linux suspend time. Compare real UTC frame
+            # times so suspension cannot silently turn into a successful 24h run.
+            elapsed = max(0, (now - start_time).total_seconds())
+            gap_seconds = (now - previous_frame_at).total_seconds() if previous_frame_at else None
+            interrupted = gap_seconds is not None and (
+                gap_seconds < 0 or gap_seconds > max_sample_gap_seconds
+            )
             frame = {"checked_at": iso(now), "elapsed_seconds": elapsed, "sessions": samples}
+            if interrupted:
+                manifest["interruption"] = {
+                    "reason": "CLOCK_MOVED_BACKWARD" if gap_seconds < 0 else "SAMPLING_GAP",
+                    "previous_frame_at": iso(previous_frame_at),
+                    "resumed_at": iso(now),
+                    "gap_seconds": gap_seconds,
+                }
+                manifest["state"] = "INTERRUPTED"
+            previous_frame_at = now
             with (output / "samples.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(canonical_json(frame) + "\n")
                 stream.flush()
@@ -175,10 +212,10 @@ async def observe(
                     "latest": frame,
                 }
             )
-            if elapsed >= duration_hours * 3600:
+            if not interrupted and elapsed >= duration_hours * 3600:
                 manifest["state"] = "COMPLETED"
             atomic_write(manifest_path, canonical_json(manifest) + "\n")
-            if manifest["state"] == "COMPLETED":
+            if manifest["state"] in ("COMPLETED", "INTERRUPTED"):
                 break
             try:
                 await asyncio.wait_for(

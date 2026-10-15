@@ -1,5 +1,6 @@
 """Versioned Decisions request and fail-closed interpretation, without I/O."""
 
+from collections import Counter
 from decimal import Decimal
 from typing import Any
 
@@ -35,7 +36,78 @@ QUESTIONS = {
 }
 
 
+def compact_trade_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Keep selected evidence intact; summarize collection/rejection audit for inference."""
+    result = {**state}
+    for section in ("news", "prediction_markets"):
+        if section not in state:
+            continue
+        source = state[section]
+        fields = (
+            "status",
+            "items",
+            "absence_verified_in_scope",
+            "coverage",
+            "reason",
+            "scope",
+            "candidate_count",
+            "classified_not_relevant",
+            "pending_count",
+            "tracked_market_count",
+            "selection_revision",
+            "truncated",
+            "limitation",
+            "absence_limitation",
+            "diagnostic_counts",
+        )
+        compact = {key: source[key] for key in fields if key in source}
+        # The composed factor's availability/conflict are decision evidence.
+        # Stage receipts remain in SQLite without expanding every trade prompt.
+        audit_fields = {
+            "semantic_classification_id",
+            "semantic_available_at",
+            "conflict_criteria_version",
+            "conflict_classification_id",
+            "conflict_ai_call_id",
+            "conflict_available_at",
+            "peer_evidence_ids",
+        }
+        if "items" in compact:
+            if not isinstance(compact["items"], list) or any(
+                not isinstance(item, dict) for item in compact["items"]
+            ):
+                raise ValueError("External factors must be a list of objects")
+            compact["items"] = [
+                {key: value for key, value in item.items() if key not in audit_fields}
+                for item in compact["items"]
+            ]
+        # No selected factor, conflict, time boundary or foundation index is removed.
+        diagnostics = source.get("pending", []) + source.get("classification_failures", [])
+        if diagnostics:
+            counts = Counter()
+            for item in diagnostics:
+                counts.update(item.get("reasons", []))
+                if item.get("reason"):
+                    counts.update([item["reason"]])
+            compact["diagnostic_counts"] = dict(sorted(counts.items()))
+        if "pending" in source:
+            compact["pending_count"] = len(source["pending"])
+        metadata = ("status", "complete", "observed_at", "reason", "reasons", "scope")
+        if "sources" in source:
+            compact["sources"] = {
+                identity: {key: item[key] for key in metadata if key in item}
+                for identity, item in source["sources"].items()
+            }
+        if "discovery" in source:
+            compact["discovery"] = {
+                key: source["discovery"][key] for key in metadata if key in source["discovery"]
+            }
+        result[section] = compact
+    return result
+
+
 def trade_payload(state: dict[str, Any], model: str) -> dict[str, Any]:
+    state = compact_trade_state(state)
     if len(canonical_json(state).encode()) > 30000:
         raise ValueError("Decision state exceeds the V1 context bound")
     payload = {
@@ -59,6 +131,16 @@ def trade_payload(state: dict[str, Any], model: str) -> dict[str, Any]:
             },
         },
     }
+    if state.get("strategy_context"):
+        payload["questions"]["action"] = {
+            **QUESTIONS["action"],
+            "instructions": QUESTIONS["action"]["instructions"]
+            + (
+                " Follow strategy_context's configured objective, time horizon and instructions. "
+                "A new BUY requires its structural entry setup and entry window. "
+                "The engine enforces execution/risk constraints independently; never override them."
+            ),
+        }
     if len(canonical_json(payload).encode()) > 32000:
         raise ValueError("Decision context exceeds the 32 KB V1 bound")
     return payload

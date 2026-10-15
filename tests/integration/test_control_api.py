@@ -93,6 +93,76 @@ async def cleanup(items):
 
 
 @pytest.mark.asyncio
+async def test_explicit_legacy_ai_budget_policy_preserves_runtime(tmp_path):
+    items = await fixture(tmp_path)
+    client, auth, commands, runtime, metadata, clock, upstream, app = items
+    try:
+        status = await client.get("/v1/ai-budget")
+        assert status.status_code == 200 and status.json()["scope"] == "ALL_SESSIONS_REPORT"
+        assert status.json()["legacy"]["policy"]["cost_limit_enabled"] is True
+        changed = await client.put(
+            "/v1/legacy-ai-budget",
+            json={
+                "cost_limit_enabled": False,
+                "max_observed_cost_usd_per_day": "0.25",
+            },
+        )
+        assert changed.status_code == 200
+        assert changed.json()["policy"]["max_observed_cost_usd_per_day"] == "0.25"
+        assert not changed.json()["policy"]["cost_limit_enabled"]
+        repeated = await client.put(
+            "/v1/legacy-ai-budget",
+            json={
+                "cost_limit_enabled": False,
+                "max_observed_cost_usd_per_day": "0.25",
+            },
+        )
+        assert repeated.json()["policy"]["revision"] == 1
+        assert (
+            await client.put("/v1/legacy-ai-budget", json={"cost_limit_enabled": True})
+        ).status_code == 422
+        for invalid in ("0", "-1", "NaN", "Infinity", 0.1):
+            response = await client.put(
+                "/v1/legacy-ai-budget",
+                json={
+                    "cost_limit_enabled": True,
+                    "max_observed_cost_usd_per_day": invalid,
+                },
+            )
+            assert response.status_code == 422
+        assert (await client.get("/v1/ai-budget")).json()["physical_attempts"] == 0
+        assert runtime.starts == runtime.stops == metadata.calls == 0
+        assert not list((tmp_path / "sessions").glob("*/poc.sqlite3"))
+    finally:
+        await cleanup(items)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scopes,sessions", [(("read",), ("*",)), (("read", "manage"), ("eth-only",))]
+)
+async def test_global_ai_budget_denies_write_for_readonly_or_session_scoped_token(
+    tmp_path, scopes, sessions
+):
+    items = await fixture(tmp_path, scopes=scopes, sessions=sessions)
+    client, *_ = items
+    try:
+        response = await client.put(
+            "/v1/ai-budget",
+            json={
+                "cost_limit_enabled": False,
+                "max_observed_cost_usd_per_day": "0.05",
+            },
+        )
+        assert response.status_code == 403
+        client.headers.pop("Authorization")
+        assert (await client.get("/v1/ai-budget")).status_code == 401
+        assert not (tmp_path / "operational" / "ai-budget.sqlite3").exists()
+    finally:
+        await cleanup(items)
+
+
+@pytest.mark.asyncio
 async def test_create_retry_parallel_start_snapshot_logout_do_not_reset_or_stop_engine(tmp_path):
     items = await fixture(tmp_path)
     client, auth, commands, runtime, metadata, clock, upstream, app = items

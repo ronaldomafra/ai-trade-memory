@@ -13,6 +13,18 @@ from poc.domain.jev import parse_trade_response, trade_payload
 from poc.domain.primitives import DomainError
 
 
+async def check_openrouter(config: Config, recover: bool = False) -> dict:
+    budget = AIBudget(Path(config.app.data_dir) / "operational" / "ai-budget.sqlite3")
+    client = OpenRouterDecisions(
+        config.ai, os.environ.get("OPENROUTER_API_KEY"), "check-openrouter", budget, SystemClock()
+    )
+    try:
+        return await client.check_auth(recover)
+    finally:
+        await client.close()
+        budget.close()
+
+
 async def smoke_openrouter(config: Config) -> dict:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:

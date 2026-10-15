@@ -28,7 +28,7 @@ from poc.application.engine import LiveEngine
 from poc.application.learning import LearningEngine
 from poc.application.transfer import TransferEngine
 from poc.bootstrap import SystemClock, session_manager
-from poc.config import Config
+from poc.config import Config, parse_config
 from poc.domain.primitives import DomainError, stable_id
 
 
@@ -96,7 +96,7 @@ async def run_service(
 ) -> dict[str, Any]:
     manager = session_manager(config)
     record = manager.restore(run_id)
-    saved = Config.model_validate(record["config"])
+    saved = parse_config(record["config"])
     if record["market_metadata"]["raw"].get("fixture"):
         raise DomainError("A fixture session cannot be started as a live engine")
     with manager.lease(run_id):
@@ -104,7 +104,12 @@ async def run_service(
         if saved.learning.initial_dataset_path and not DatasetFiles(database).imported():
             database.close()
             raise DomainError("Initial dataset preparation is incomplete; finish preparation first")
-        source = BinancePublic()
+        source = BinancePublic(
+            intervals=(saved.market.interval, saved.market.trend_interval),
+            max_candle_pages=saved.profile_definition.parameters.market.warmup_max_pages_per_interval
+            if getattr(saved, "profile_definition", None)
+            else 5,
+        )
         engine = None
         helpers: list[asyncio.Task] = []
         server = None
@@ -228,11 +233,18 @@ async def backfill(config: Config, run_id: str, days: int) -> dict[str, Any]:
     if not 1 <= days <= 60:
         raise DomainError("Backfill days must be between 1 and 60")
     record = session_manager(config).restore(run_id)
-    source = BinancePublic()
+    saved = parse_config(record["config"])
+    intervals = (saved.market.interval, saved.market.trend_interval)
+    source = BinancePublic(
+        intervals=intervals,
+        max_candle_pages=saved.profile_definition.parameters.market.warmup_max_pages_per_interval
+        if getattr(saved, "profile_definition", None)
+        else 5,
+    )
     db = SessionDatabase(record["paths"]["sqlite"], create=False)
     inserted = 0
     try:
-        for interval in ("15m", "1h"):
+        for interval in intervals:
             start = datetime.now(UTC) - timedelta(days=days)
             while start < datetime.now(UTC):
                 rows = await source.candles(record["symbol"], interval, 999, start_at=start)

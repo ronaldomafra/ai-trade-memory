@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -57,6 +58,7 @@ class ControlClient:
         self.refresh_token = None
         self.scopes = frozenset({"read", "manage"})
         self.refresh_lock = asyncio.Lock()
+        self.challenge_expires_at = None
 
     @staticmethod
     def check(response: httpx.Response):
@@ -73,7 +75,9 @@ class ControlClient:
         )
         self.check(response)
         self.scopes = frozenset(scopes)
-        return response.json()["challenge_token"]
+        payload = response.json()
+        self.challenge_expires_at = datetime.fromisoformat(payload["expires_at"])
+        return payload["challenge_token"]
 
     async def second_factor(self, challenge: str, code: str):
         response = await self.http.post(

@@ -6,16 +6,18 @@ from typing import Protocol
 from uuid import uuid4
 
 from poc.application.ports import Clock, PublicMetadataPort, StorageFactory
+from poc.application.profiles import ProfileService
 from poc.application.sessions import PROFILE_ID, SessionManager, valid_run_id
-from poc.config import Config
+from poc.config import Config, parse_config
 from poc.domain.primitives import DomainError
 from poc.domain.security import Principal
+from poc.profile_config import ProfileDefinition, resolve_profile, with_session_budget
 
 EDITABLE = {
     "strategy": set(type(Config().strategy).model_fields),
     "indicators": set(type(Config().indicators).model_fields),
     "simulation": set(type(Config().simulation).model_fields),
-    "ai": {"timeout_seconds", "max_retries", "max_calls_per_day", "max_observed_cost_usd_per_day"},
+    "ai": {"timeout_seconds", "max_retries", "max_calls_per_day"},
     "news": {
         "enabled",
         "api_poll_minutes",
@@ -29,6 +31,8 @@ EDITABLE = {
 
 
 def public_settings(config: Config) -> dict:
+    if getattr(config, "profile_definition", None):
+        return config.profile_definition.parameters.model_dump(mode="json")
     content = config.model_dump(mode="json")
     return {
         section: {key: value for key, value in content[section].items() if key in keys}
@@ -75,6 +79,8 @@ class CommandStorePort(Protocol):
     ) -> dict: ...
     def finish_command(self, command_id: str, response: dict, now: datetime): ...
     def register_session(self, record: dict): ...
+    def command_resolution(self, command_id: str) -> dict | None: ...
+    def pin_resolution(self, command_id: str, value: dict) -> dict: ...
 
 
 class ControlService:
@@ -86,13 +92,17 @@ class ControlService:
         clock: Clock,
         runtime: RuntimePort,
         commands: CommandStorePort,
+        profile_repository=None,
     ):
         self.template, self.storage, self.metadata, self.clock = template, storage, metadata, clock
         self.runtime, self.commands = runtime, commands
         self.locks: dict[str, asyncio.Lock] = {}
+        self.profile_service = (
+            ProfileService(profile_repository, template) if profile_repository else None
+        )
 
     def profiles(self) -> dict:
-        return {
+        result = {
             "profiles": [
                 {
                     "profile_id": PROFILE_ID,
@@ -107,18 +117,39 @@ class ControlService:
                 }
             ]
         }
+        if self.profile_service:
+            for record in self.profile_service.repository.list_profiles():
+                definition = ProfileDefinition.model_validate(record["definition"])
+                p = definition.parameters
+                result["profiles"].append(
+                    {
+                        "profile_id": record["profile_id"],
+                        "version": str(record["version"]),
+                        "implemented": True,
+                        "status": record["status"],
+                        "style": definition.profile.style,
+                        "display_name": definition.profile.display_name,
+                        "profile_hash": record["profile_hash"],
+                        "symbol_default": definition.session_defaults.symbol,
+                        "interval": p.market.interval,
+                        "trend_interval": p.market.trend_interval,
+                        "template": with_session_budget(record["definition"])["parameters"],
+                        "parameter_schema": ProfileDefinition.model_json_schema(),
+                        "definition": record["definition"],
+                        "mode": "PAPER_ONLY",
+                    }
+                )
+        return result
 
     async def prepare(
         self, principal: Principal, key: str, body: dict, dataset_path: str | None = None
     ) -> dict:
-        if body["profile_id"] != PROFILE_ID:
+        profile_record = None
+        if body["profile_id"] != PROFILE_ID and self.profile_service is None:
             raise DomainError("Unknown or incomplete profile")
         run_id = body.get("run_id") or "run-" + uuid4().hex[:16]
         valid_run_id(run_id)
         principal.require("manage", run_id)
-        config = effective_config(
-            self.template, body["symbol"], body.get("overrides", {}), dataset_path
-        )
         command = self.commands.reserve_command(
             principal.user_id, key, "PREPARE_SESSION", body, run_id, self.clock.now()
         )
@@ -130,9 +161,40 @@ class ControlService:
                 return command["response"]
             run_id = command["run_id"]
             principal.require("manage", run_id)
+            if body["profile_id"] == PROFILE_ID:
+                config = effective_config(
+                    self.template, body["symbol"], body.get("overrides", {}), dataset_path
+                )
+            else:
+                pinned = self.commands.command_resolution(command["command_id"])
+                if pinned is None:
+                    profile, profile_record = self.profile_service.resolve(
+                        body["profile_id"], body.get("profile_version")
+                    )
+                    if (
+                        body.get("profile_hash")
+                        and body["profile_hash"] != profile_record["profile_hash"]
+                    ):
+                        raise DomainError("Profile changed; review its revision and hash")
+                    effective = with_session_budget(profile.model_dump(mode="json"))
+                    effective["parameters"] = merge_settings(
+                        effective["parameters"], body.get("overrides", {})
+                    )
+                    self.profile_service.validate(effective)
+                    profile = ProfileDefinition.model_validate(effective)
+                    config = resolve_profile(profile, self.template, body["symbol"], dataset_path)
+                    pinned = self.commands.pin_resolution(
+                        command["command_id"],
+                        {
+                            "config": config.model_dump(mode="json"),
+                            "profile_record": profile_record,
+                        },
+                    )
+                config = parse_config(pinned["config"])
+                profile_record = pinned["profile_record"]
             metadata = await self.metadata.metadata(config.market.symbol)
             record = SessionManager(config, self.storage).prepare(
-                run_id, body["profile_id"], metadata, self.clock.now()
+                run_id, body["profile_id"], metadata, self.clock.now(), profile_record
             )
             self.commands.register_session(record)
             public = {
